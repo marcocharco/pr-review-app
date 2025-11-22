@@ -17,3 +17,10 @@ export interface FileNodeProps {
   node: Node;
   style: React.CSSProperties;
 }
+
+export interface GitHubUser {
+  login: string;
+  name?: string;
+  avatar_url: string;
+  html_url: string;
+}
