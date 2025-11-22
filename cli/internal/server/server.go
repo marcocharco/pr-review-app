@@ -20,9 +20,14 @@ func Start(ctx context.Context) (*Server, error) {
 		_, _ = w.Write([]byte(msg))
 	})
 
-	srv := &http.Server{Handler: mux, Addr: ":8080"}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
+
+	srv := &http.Server{Handler: mux}
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("server error: %v", err)
 		}
 	}()
