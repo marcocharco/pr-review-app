@@ -7,12 +7,15 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/joho/godotenv"
 	"github.com/marcocharco/pr-review-app/cli/internal/auth"
 	"github.com/marcocharco/pr-review-app/cli/internal/browser"
+	"github.com/marcocharco/pr-review-app/cli/internal/collect"
 	"github.com/marcocharco/pr-review-app/cli/internal/server"
+	"github.com/marcocharco/pr-review-app/cli/internal/types"
 )
 
 var osInterruptSignals = []os.Signal{syscall.SIGINT, syscall.SIGTERM}
@@ -44,12 +47,27 @@ func main() {
 	} else {
 		fmt.Printf("Logged in as %s\n", config.User)
 	}
+
+	var session types.Session
+	if len(os.Args) > 1 {
+		arg := os.Args[1]
+		prNum, err := strconv.Atoi(arg)
+		if err != nil {
+			log.Fatalf("invalid PR number argument: %v", err)
+		}
+		fmt.Printf("Fetching PR #%d...\n", prNum)
+		session, err = collect.BuildPRSession(ctx, prNum, config.AccessToken)
+		if err != nil {
+			log.Fatalf("failed to build PR session: %v", err)
+		}
+	}
+
+	srv, err := server.Start(ctx, session)
 	if err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}
 
 	url := srv.BaseURL + "/view"
-	log.Printf("session ready: %s", url)
 	if err := browser.Open(url); err != nil {
 		log.Printf("warning: could not open browser automatically: %v", err)
 	}

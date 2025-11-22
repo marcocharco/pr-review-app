@@ -2,10 +2,14 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+
+	"github.com/marcocharco/pr-review-app/cli/internal/types"
 )
 
 type Server struct {
@@ -13,10 +17,15 @@ type Server struct {
 	srv     *http.Server
 }
 
-func Start(ctx context.Context) (*Server, error) {
+// Start serves the given session at /session and a placeholder at /.
+func Start(ctx context.Context, session types.Session) (*Server, error) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/session", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(session)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		msg := "Diff session service is running"
+		msg := "Diff session service is running. Viewer assets not yet wired; fetch /session."
 		_, _ = w.Write([]byte(msg))
 	})
 
@@ -38,7 +47,7 @@ func Start(ctx context.Context) (*Server, error) {
 	}()
 
 	return &Server{
-		BaseURL: fmt.Sprintf("http://%s", srv.Addr),
+		BaseURL: fmt.Sprintf("http://%s", ln.Addr().String()),
 		srv:     srv,
 	}, nil
 }
