@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { GitPullRequest, ArrowRight } from "lucide-react";
+import { GitPullRequest, ArrowRight, Loader2, AlertCircle } from "lucide-react";
 
 // --- Main App ---
 
@@ -9,6 +9,10 @@ export default function App() {
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
   const [prNumber, setPrNumber] = useState("");
+
+  // Data State
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Canvas State
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -46,6 +50,47 @@ export default function App() {
     const ZOOM_SPEED = 0.001;
     const newZoom = Math.max(0.1, Math.min(3, zoom - e.deltaY * ZOOM_SPEED));
     setZoom(newZoom);
+  };
+
+  // --- GitHub API Fetch ---
+
+  const fetchPR = async () => {
+    if (!token || !owner || !repo || !prNumber) {
+      setError("Please fill in all fields");
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+        Accept: "application/vnd.github.v3+json",
+      };
+
+      const response = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`,
+        { headers }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `GitHub API Error: ${response.status} ${response.statusText}`
+        );
+      }
+
+      const files = await response.json();
+      console.log("Fetched PR files:", files);
+    } catch (err) {
+      console.error(err);
+      setError(
+        err instanceof Error ? err.message : "An unknown error occurred"
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -91,8 +136,16 @@ export default function App() {
 
           <div className="h-6 w-px bg-[#27272a] mx-1" />
 
-          <button className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20">
-            <ArrowRight size={14} />
+          <button
+            onClick={fetchPR}
+            disabled={isLoading}
+            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isLoading ? (
+              <Loader2 className="animate-spin" size={14} />
+            ) : (
+              <ArrowRight size={14} />
+            )}
             Load PR
           </button>
         </div>
@@ -138,6 +191,12 @@ export default function App() {
           <p className="text-zinc-500 text-sm max-w-xs text-center leading-relaxed">
             Enter a public GitHub repository above to get started.
           </p>
+          {error && (
+            <div className="mt-6 flex items-center gap-2 text-rose-400 bg-rose-400/10 px-4 py-2 rounded border border-rose-400/20 shadow-sm pointer-events-auto">
+              <AlertCircle size={16} />
+              <span className="text-xs font-medium">{error}</span>
+            </div>
+          )}
         </div>
 
         {/* Controls Overlay */}
