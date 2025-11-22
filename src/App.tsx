@@ -328,7 +328,7 @@ export default function App() {
         ref={headerRef}
         className="h-14 bg-[#09090b] border-b border-[#27272a] px-6 flex items-center justify-between z-20 relative"
       >
-        <div className="flex items-center gap-2 text-zinc-100 font-bold text-lg tracking-tight">
+        <div className="flex items-center gap-2 text-zinc-100 font-medium text-lg tracking-tight">
           <GitPullRequest className="text-blue-500" size={20} />
           <span>CanvasReview</span>
         </div>
