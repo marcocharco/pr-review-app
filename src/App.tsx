@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { GitPullRequest, ArrowRight, Loader2, AlertCircle } from "lucide-react";
-
-// --- Main App ---
+import type { Node, FileData } from "./types";
+import { FileNode } from "./components/FileNode";
 
 export default function App() {
   // Inputs
@@ -11,6 +11,7 @@ export default function App() {
   const [prNumber, setPrNumber] = useState("");
 
   // Data State
+  const [nodes, setNodes] = useState<Node[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,6 +53,38 @@ export default function App() {
     setZoom(newZoom);
   };
 
+  // --- Layout Logic ---
+
+  const processFilesToLayout = (files: FileData[]) => {
+    const COLUMNS = 3;
+    const X_SPACING = 600;
+    const Y_SPACING = 600;
+
+    const newNodes: Node[] = [];
+
+    files.forEach((file: FileData, index: number) => {
+      const col = index % COLUMNS;
+      const row = Math.floor(index / COLUMNS);
+      const x = col * X_SPACING;
+      const y = row * Y_SPACING;
+
+      const node = {
+        id: `file-${index}`,
+        x,
+        y,
+        data: {
+          filename: file.filename,
+          status: file.status,
+          patch: file.patch,
+        },
+      };
+
+      newNodes.push(node);
+    });
+
+    setNodes(newNodes);
+  };
+
   // --- GitHub API Fetch ---
 
   const fetchPR = async () => {
@@ -62,6 +95,9 @@ export default function App() {
 
     setIsLoading(true);
     setError(null);
+    setNodes([]);
+    setPan({ x: 100, y: 100 });
+    setZoom(1);
 
     try {
       const headers = {
@@ -81,8 +117,9 @@ export default function App() {
         );
       }
 
-      const files = await response.json();
+      const files: FileData[] = await response.json();
       console.log("Fetched PR files:", files);
+      processFilesToLayout(files);
     } catch (err) {
       console.error(err);
       setError(
@@ -178,26 +215,39 @@ export default function App() {
             transformOrigin: "0 0",
           }}
           className="absolute top-0 left-0 w-0 h-0 pointer-events-none"
-        ></div>
+        >
+          {/* Nodes Layer */}
+          <div className="pointer-events-auto">
+            {nodes.map((node) => (
+              <FileNode
+                key={node.id}
+                node={node}
+                style={{ transform: `translate(${node.x}px, ${node.y}px)` }}
+              />
+            ))}
+          </div>
+        </div>
 
         {/* Empty State */}
-        <div className="absolute inset-0 flex items-center justify-center flex-col pointer-events-none">
-          <div className="w-20 h-20 bg-[#18181b] rounded-2xl border border-[#27272a] flex items-center justify-center mb-6 shadow-2xl shadow-black">
-            <GitPullRequest size={40} className="text-zinc-500" />
-          </div>
-          <h2 className="text-zinc-200 text-lg font-medium mb-2">
-            Ready to Review
-          </h2>
-          <p className="text-zinc-500 text-sm max-w-xs text-center leading-relaxed">
-            Enter a public GitHub repository above to get started.
-          </p>
-          {error && (
-            <div className="mt-6 flex items-center gap-2 text-rose-400 bg-rose-400/10 px-4 py-2 rounded border border-rose-400/20 shadow-sm pointer-events-auto">
-              <AlertCircle size={16} />
-              <span className="text-xs font-medium">{error}</span>
+        {nodes.length === 0 && !isLoading && (
+          <div className="absolute inset-0 flex items-center justify-center flex-col pointer-events-none">
+            <div className="w-20 h-20 bg-[#18181b] rounded-2xl border border-[#27272a] flex items-center justify-center mb-6 shadow-2xl shadow-black">
+              <GitPullRequest size={40} className="text-zinc-500" />
             </div>
-          )}
-        </div>
+            <h2 className="text-zinc-200 text-lg font-medium mb-2">
+              Ready to Review
+            </h2>
+            <p className="text-zinc-500 text-sm max-w-xs text-center leading-relaxed">
+              Enter a public GitHub repository above to get started.
+            </p>
+            {error && (
+              <div className="mt-6 flex items-center gap-2 text-rose-400 bg-rose-400/10 px-4 py-2 rounded border border-rose-400/20 shadow-sm pointer-events-auto">
+                <AlertCircle size={16} />
+                <span className="text-xs font-medium">{error}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Controls Overlay */}
         <div className="absolute bottom-6 right-6 flex flex-col gap-2 pointer-events-auto">
