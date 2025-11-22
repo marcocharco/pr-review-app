@@ -27,7 +27,7 @@ export const FileNode = ({ node, style }: FileNodeProps) => {
         <div className="flex items-center gap-3 overflow-hidden">
           <div
             className={`w-6 h-6 flex items-center justify-center rounded text-[10px] font-bold font-mono tracking-tighter ${getStatusColor(
-              data.status
+              data.status,
             )}`}
           >
             {getFileIcon(data.filename)}
@@ -44,7 +44,7 @@ export const FileNode = ({ node, style }: FileNodeProps) => {
         <div className="flex items-center gap-3">
           <span
             className={`text-[10px] px-2 py-0.5 rounded font-medium uppercase tracking-wider ${getStatusColor(
-              data.status
+              data.status,
             )}`}
           >
             {data.status}
@@ -83,8 +83,8 @@ export const FileNode = ({ node, style }: FileNodeProps) => {
                       line.startsWith("+")
                         ? "border-emerald-500"
                         : line.startsWith("-")
-                        ? "border-rose-500"
-                        : "border-transparent"
+                          ? "border-rose-500"
+                          : "border-transparent"
                     }`}
                   >
                     <span className={`${textClass} inline-block w-full`}>
