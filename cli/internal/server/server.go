@@ -13,6 +13,7 @@ type Server struct {
 	srv     *http.Server
 }
 
+// testing
 func Start(ctx context.Context) (*Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
