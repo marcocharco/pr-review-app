@@ -5,7 +5,6 @@ import { getFileIcon, getStatusColor } from "../utils/fileUtils";
 
 export const FileNode = ({ node, style }: FileNodeProps) => {
   const [expanded, setExpanded] = useState(true);
-
   const { data } = node;
 
   const diffLines = useMemo(() => {
@@ -101,4 +100,3 @@ export const FileNode = ({ node, style }: FileNodeProps) => {
     </div>
   );
 };
-

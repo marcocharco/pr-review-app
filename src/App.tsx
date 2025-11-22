@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { GitPullRequest, ArrowRight, Loader2, AlertCircle } from "lucide-react";
 import type { Node, FileData } from "./types";
 import { FileNode } from "./components/FileNode";
@@ -20,8 +20,25 @@ export default function App() {
   const [zoom, setZoom] = useState(1);
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef(pan);
+  const zoomRef = useRef(zoom);
+  const gestureTypeRef = useRef<"pan" | "scroll" | null>(null);
+  const gestureTimeoutRef = useRef<number | null>(null);
+  const activeScrollableElementRef = useRef<HTMLElement | null>(null);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
 
   // --- Canvas Logic ---
+
+  const lastMousePosRef = useRef<{ x: number; y: number } | null>(null);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
@@ -30,48 +47,170 @@ export default function App() {
       (target.classList && target.classList.contains("canvas-bg"))
     ) {
       setIsDragging(true);
+      lastMousePosRef.current = { x: e.clientX, y: e.clientY };
+      e.preventDefault(); // Prevent text selection during drag
     }
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (isDragging) {
-      setPan((prev) => ({
-        x: prev.x + e.movementX,
-        y: prev.y + e.movementY,
-      }));
+  // Document-level mouse move handler for continuous panning
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleDocumentMouseMove = (e: MouseEvent) => {
+      if (lastMousePosRef.current) {
+        e.preventDefault(); // Prevent text selection and other default behaviors
+        const deltaX = e.clientX - lastMousePosRef.current.x;
+        const deltaY = e.clientY - lastMousePosRef.current.y;
+
+        setPan((prev) => ({
+          x: prev.x + deltaX,
+          y: prev.y + deltaY,
+        }));
+
+        lastMousePosRef.current = { x: e.clientX, y: e.clientY };
+      }
+    };
+
+    const handleDocumentMouseUp = () => {
+      setIsDragging(false);
+      lastMousePosRef.current = null;
+    };
+
+    document.addEventListener("mousemove", handleDocumentMouseMove);
+    document.addEventListener("mouseup", handleDocumentMouseUp);
+
+    return () => {
+      document.removeEventListener("mousemove", handleDocumentMouseMove);
+      document.removeEventListener("mouseup", handleDocumentMouseUp);
+    };
+  }, [isDragging]);
+
+  const handleWheel = useCallback((event: WheelEvent) => {
+    // Check if the event target is within the header
+    const target = event.target as HTMLElement;
+    if (headerRef.current && headerRef.current.contains(target)) {
+      // Allow default behavior on header
+      return;
     }
-  };
 
-  const handleMouseUp = () => setIsDragging(false);
+    // Check if the cursor is over the header by checking clientY position
+    if (headerRef.current) {
+      const headerRect = headerRef.current.getBoundingClientRect();
+      if (event.clientY <= headerRect.bottom) {
+        // Cursor is on or above the header, allow default behavior
+        return;
+      }
+    }
 
-  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLElement;
-    if (target.closest && target.closest(".overflow-y-auto")) return;
+    // Prevent default wheel behavior (including trackpad pinch) on canvas
+    event.preventDefault();
 
-    e.preventDefault();
+    if (!containerRef.current) return;
+
+    // Clear any existing gesture timeout
+    if (gestureTimeoutRef.current) {
+      clearTimeout(gestureTimeoutRef.current);
+      gestureTimeoutRef.current = null;
+    }
+
+    // Check if the event is over a scrollable element
+    const targetElement = event.target as HTMLElement;
+    const scrollableElement = targetElement.closest?.(
+      ".overflow-y-auto"
+    ) as HTMLElement;
+
+    // Determine gesture type on first event or if gesture state is reset
+    if (gestureTypeRef.current === null) {
+      // New gesture - determine type based on where cursor is
+      if (scrollableElement) {
+        const canScrollUp = scrollableElement.scrollTop > 0;
+        const canScrollDown =
+          scrollableElement.scrollTop <
+          scrollableElement.scrollHeight - scrollableElement.clientHeight;
+
+        const scrollingUp = event.deltaY < 0;
+        const scrollingDown = event.deltaY > 0;
+        const isPrimarilyVertical =
+          Math.abs(event.deltaY) > Math.abs(event.deltaX) * 2;
+
+        // If cursor starts in scrollable area and can scroll, lock to scroll gesture
+        if (
+          isPrimarilyVertical &&
+          ((scrollingUp && canScrollUp) || (scrollingDown && canScrollDown))
+        ) {
+          gestureTypeRef.current = "scroll";
+          activeScrollableElementRef.current = scrollableElement;
+        } else {
+          // Otherwise, lock to pan gesture
+          gestureTypeRef.current = "pan";
+        }
+      } else {
+        // Cursor not over scrollable element, lock to pan gesture
+        gestureTypeRef.current = "pan";
+      }
+    }
+
+    // Handle based on locked gesture type
+    if (
+      gestureTypeRef.current === "scroll" &&
+      activeScrollableElementRef.current
+    ) {
+      // Locked to scroll gesture - only scroll the element, no canvas panning
+      const element = activeScrollableElementRef.current;
+      const canScrollUp = element.scrollTop > 0;
+      const canScrollDown =
+        element.scrollTop < element.scrollHeight - element.clientHeight;
+
+      const scrollingUp = event.deltaY < 0;
+      const scrollingDown = event.deltaY > 0;
+
+      if ((scrollingUp && canScrollUp) || (scrollingDown && canScrollDown)) {
+        element.scrollTop += event.deltaY;
+      }
+
+      // Reset gesture after a delay (when user stops scrolling)
+      gestureTimeoutRef.current = window.setTimeout(() => {
+        gestureTypeRef.current = null;
+        activeScrollableElementRef.current = null;
+      }, 150);
+
+      return;
+    }
+
+    // Locked to pan gesture - continue panning regardless of cursor position
+    // Reset gesture after a delay (when user stops panning)
+    gestureTimeoutRef.current = window.setTimeout(() => {
+      gestureTypeRef.current = null;
+      activeScrollableElementRef.current = null;
+    }, 150);
 
     // Trackpad pinch usually has ctrlKey set, or we can heuristically detect it
-    const isPinch = e.ctrlKey || e.metaKey;
+    const isPinch = event.ctrlKey || event.metaKey;
+
+    // Use refs to get current values without causing callback recreation
+    const currentPan = panRef.current;
+    const currentZoom = zoomRef.current;
 
     if (isPinch) {
-      if (!containerRef.current) return;
-
       // Zoom logic
       const ZOOM_SPEED = 0.01;
       const rect = containerRef.current.getBoundingClientRect();
 
       // Cursor position relative to the canvas container
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
 
       // Current point in the scene (untransformed)
       // screen = scene * zoom + pan
       // scene = (screen - pan) / zoom
-      const sceneX = (mouseX - pan.x) / zoom;
-      const sceneY = (mouseY - pan.y) / zoom;
+      const sceneX = (mouseX - currentPan.x) / currentZoom;
+      const sceneY = (mouseY - currentPan.y) / currentZoom;
 
       // Calculate new zoom
-      const newZoom = Math.max(0.1, Math.min(3, zoom - e.deltaY * ZOOM_SPEED));
+      const newZoom = Math.max(
+        0.1,
+        Math.min(3, currentZoom - event.deltaY * ZOOM_SPEED)
+      );
 
       // Calculate new pan to keep the point under cursor fixed
       // newPan = screen - scene * newZoom
@@ -83,11 +222,27 @@ export default function App() {
     } else {
       // Pan logic (trackpad two-finger swipe or mouse wheel)
       setPan((prev) => ({
-        x: prev.x - e.deltaX,
-        y: prev.y - e.deltaY,
+        x: prev.x - event.deltaX,
+        y: prev.y - event.deltaY,
       }));
     }
-  };
+  }, []);
+
+  // Set up native wheel event listener with passive: false
+  useEffect(() => {
+    const node = containerRef.current;
+    if (node) {
+      node.addEventListener("wheel", handleWheel, { passive: false });
+      return () => {
+        node.removeEventListener("wheel", handleWheel);
+        // Clean up any pending gesture timeout
+        if (gestureTimeoutRef.current) {
+          clearTimeout(gestureTimeoutRef.current);
+          gestureTimeoutRef.current = null;
+        }
+      };
+    }
+  }, [handleWheel]);
 
   // --- Layout Logic ---
 
@@ -169,7 +324,10 @@ export default function App() {
   return (
     <div className="w-screen h-screen bg-[#09090b] flex flex-col overflow-hidden font-sans text-zinc-300 selection:bg-blue-500/30">
       {/* Header */}
-      <div className="h-14 bg-[#09090b] border-b border-[#27272a] px-6 flex items-center justify-between z-20 relative">
+      <div
+        ref={headerRef}
+        className="h-14 bg-[#09090b] border-b border-[#27272a] px-6 flex items-center justify-between z-20 relative"
+      >
         <div className="flex items-center gap-2 text-zinc-100 font-bold text-lg tracking-tight">
           <GitPullRequest className="text-blue-500" size={20} />
           <span>CanvasReview</span>
@@ -227,12 +385,15 @@ export default function App() {
       {/* Infinite Canvas Container */}
       <div
         ref={containerRef}
-        className="flex-1 relative overflow-hidden bg-[#09090b] cursor-move canvas-bg"
+        className={`flex-1 relative overflow-hidden bg-[#09090b] canvas-bg ${
+          isDragging ? "cursor-grabbing" : "cursor-grab"
+        }`}
+        style={{
+          touchAction: "none",
+          overscrollBehavior: "contain",
+          userSelect: "none",
+        }}
         onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
       >
         {/* Dot Grid Pattern */}
         <div
@@ -247,8 +408,9 @@ export default function App() {
         {/* Transform Layer */}
         <div
           style={{
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
             transformOrigin: "0 0",
+            willChange: "transform",
           }}
           className="absolute top-0 left-0 w-0 h-0 pointer-events-none"
         >
@@ -258,7 +420,10 @@ export default function App() {
               <FileNode
                 key={node.id}
                 node={node}
-                style={{ transform: `translate(${node.x}px, ${node.y}px)` }}
+                style={{
+                  transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
+                  willChange: "transform",
+                }}
               />
             ))}
           </div>
