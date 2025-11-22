@@ -3,3 +3,9 @@
 @theme {
   --font-sans: "Satoshi", sans-serif;
 }
+@layer base {
+  body {
+    overflow: hidden;
+    height: 100%;
+  }
+}
