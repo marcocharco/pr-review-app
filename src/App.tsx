@@ -19,7 +19,7 @@ export default function App() {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [isDragging, setIsDragging] = useState(false);
-  const containerRef = useRef(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // --- Canvas Logic ---
 
@@ -48,9 +48,45 @@ export default function App() {
     const target = e.target as HTMLElement;
     if (target.closest && target.closest(".overflow-y-auto")) return;
 
-    const ZOOM_SPEED = 0.001;
-    const newZoom = Math.max(0.1, Math.min(3, zoom - e.deltaY * ZOOM_SPEED));
-    setZoom(newZoom);
+    e.preventDefault();
+
+    // Trackpad pinch usually has ctrlKey set, or we can heuristically detect it
+    const isPinch = e.ctrlKey || e.metaKey;
+
+    if (isPinch) {
+      if (!containerRef.current) return;
+
+      // Zoom logic
+      const ZOOM_SPEED = 0.01;
+      const rect = containerRef.current.getBoundingClientRect();
+
+      // Cursor position relative to the canvas container
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      // Current point in the scene (untransformed)
+      // screen = scene * zoom + pan
+      // scene = (screen - pan) / zoom
+      const sceneX = (mouseX - pan.x) / zoom;
+      const sceneY = (mouseY - pan.y) / zoom;
+
+      // Calculate new zoom
+      const newZoom = Math.max(0.1, Math.min(3, zoom - e.deltaY * ZOOM_SPEED));
+
+      // Calculate new pan to keep the point under cursor fixed
+      // newPan = screen - scene * newZoom
+      const newPanX = mouseX - sceneX * newZoom;
+      const newPanY = mouseY - sceneY * newZoom;
+
+      setZoom(newZoom);
+      setPan({ x: newPanX, y: newPanY });
+    } else {
+      // Pan logic (trackpad two-finger swipe or mouse wheel)
+      setPan((prev) => ({
+        x: prev.x - e.deltaX,
+        y: prev.y - e.deltaY,
+      }));
+    }
   };
 
   // --- Layout Logic ---
