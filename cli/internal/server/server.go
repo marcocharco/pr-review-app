@@ -17,17 +17,26 @@ type Server struct {
 	srv     *http.Server
 }
 
-// Start serves the given session at /session and a placeholder at /.
-func Start(ctx context.Context, session types.Session) (*Server, error) {
+type SessionGenerator func(context.Context) (types.Session, error)
+
+// Start serves the given session at /session and the static web assets from webDir at /.
+func Start(ctx context.Context, generator SessionGenerator, webDir string) (*Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/session", func(w http.ResponseWriter, r *http.Request) {
+		session, err := generator(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(session)
 	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		msg := "Diff session service is running. Viewer assets not yet wired; fetch /session."
-		_, _ = w.Write([]byte(msg))
-	})
+
+	if webDir != "" {
+		// Serve static files from the frontend build directory
+		fs := http.FileServer(http.Dir(webDir))
+		mux.Handle("/", fs)
+	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

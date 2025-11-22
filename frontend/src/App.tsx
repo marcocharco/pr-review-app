@@ -1,34 +1,17 @@
-import { useEffect, useRef, useState } from "react";
-import {
-  GitPullRequest,
-  ArrowRight,
-  Loader2,
-  AlertCircle,
-  LogIn,
-  LogOut,
-} from "lucide-react";
-import type { Node, FileData, GitHubUser } from "./types";
+import { AlertCircle, GitPullRequest, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FileNode } from "./components/FileNode";
-import { startGitHubOAuth } from "./utils/githubOAuth";
-
-const ACCESS_TOKEN_KEY = "github_access_token";
+import type { FileData, Node } from "./types";
 
 export default function App() {
-  // Inputs
-  const [token, setToken] = useState("");
-  const [owner, setOwner] = useState("");
-  const [repo, setRepo] = useState("");
-  const [prNumber, setPrNumber] = useState("");
-
-  // Auth
-  const [user, setUser] = useState<GitHubUser | null>(null);
-  const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
-
   // Data State
   const [nodes, setNodes] = useState<Node[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [repoInfo, setRepoInfo] = useState<{
+    remote: string;
+    branch: string;
+  } | null>(null);
 
   // Canvas State
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -50,90 +33,6 @@ export default function App() {
   useEffect(() => {
     zoomRef.current = zoom;
   }, [zoom]);
-
-  // --- Auth Logic ---
-
-  useEffect(() => {
-    const savedToken = localStorage.getItem(ACCESS_TOKEN_KEY);
-    if (savedToken) {
-      setToken(savedToken);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!token) {
-      setUser(null);
-      return;
-    }
-
-    const controller = new AbortController();
-
-    const fetchUser = async () => {
-      setAuthLoading(true);
-      setAuthError(null);
-      try {
-        const res = await fetch("https://api.github.com/user", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/vnd.github+json",
-          },
-          signal: controller.signal,
-        });
-
-        if (!res.ok) {
-          throw new Error(
-            res.status === 401
-              ? "GitHub token is invalid or expired. Please sign in again."
-              : `GitHub user fetch failed (${res.status})`,
-          );
-        }
-
-        const profile: GitHubUser = await res.json();
-        setUser(profile);
-        localStorage.setItem(ACCESS_TOKEN_KEY, token);
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        setUser(null);
-        localStorage.removeItem(ACCESS_TOKEN_KEY);
-        setToken("");
-        setAuthError(
-          err instanceof Error
-            ? err.message
-            : "Unable to load GitHub profile. Please re-authenticate.",
-        );
-      } finally {
-        if (!controller.signal.aborted) {
-          setAuthLoading(false);
-        }
-      }
-    };
-
-    fetchUser();
-
-    return () => controller.abort();
-  }, [token]);
-
-  const handleStartOAuth = async () => {
-    setAuthError(null);
-    try {
-      await startGitHubOAuth();
-    } catch (err) {
-      setAuthError(
-        err instanceof Error
-          ? err.message
-          : "Could not start GitHub OAuth. Check your client ID.",
-      );
-    }
-  };
-
-  const handleSignOut = () => {
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    setToken("");
-    setUser(null);
-    setAuthError(null);
-    setError(null);
-    setNodes([]);
-  };
 
   // --- Canvas Logic ---
 
@@ -215,7 +114,7 @@ export default function App() {
     // Check if the event is over a scrollable element
     const targetElement = event.target as HTMLElement;
     const scrollableElement = targetElement.closest?.(
-      ".overflow-y-auto"
+      ".overflow-y-auto",
     ) as HTMLElement;
 
     // Determine gesture type on first event or if gesture state is reset
@@ -308,7 +207,7 @@ export default function App() {
       // Calculate new zoom
       const newZoom = Math.max(
         0.1,
-        Math.min(3, currentZoom - event.deltaY * ZOOM_SPEED)
+        Math.min(3, currentZoom - event.deltaY * ZOOM_SPEED),
       );
 
       // Calculate new pan to keep the point under cursor fixed
@@ -375,19 +274,9 @@ export default function App() {
     setNodes(newNodes);
   };
 
-  // --- GitHub API Fetch ---
+  // --- Session Fetch ---
 
-  const fetchPR = async () => {
-    if (!token) {
-      setError("Please sign in with GitHub to load pull requests.");
-      return;
-    }
-
-    if (!owner || !repo || !prNumber) {
-      setError("Please fill in owner, repo, and PR number.");
-      return;
-    }
-
+  const fetchSession = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     setNodes([]);
@@ -395,25 +284,30 @@ export default function App() {
     setZoom(1);
 
     try {
-      const headers = {
-        Authorization: `Bearer ${token}`,
-        "X-GitHub-Api-Version": "2022-11-28",
-        Accept: "application/vnd.github.v3+json",
-      };
-
-      const response = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`,
-        { headers },
-      );
+      const response = await fetch("/session");
 
       if (!response.ok) {
         throw new Error(
-          `GitHub API Error: ${response.status} ${response.statusText}`,
+          `Failed to fetch session: ${response.status} ${response.statusText}`,
         );
       }
 
-      const files: FileData[] = await response.json();
-      console.log("Fetched PR files:", files);
+      const session = await response.json();
+
+      if (session.repo) {
+        setRepoInfo({
+          remote: session.repo.remote,
+          branch: session.repo.branch,
+        });
+      }
+
+      // Map session files to FileData
+      const files: FileData[] = session.files.map((f: { path: string; status: any; patch: string }) => ({
+        filename: f.path,
+        status: f.status,
+        patch: f.patch,
+      }));
+
       processFilesToLayout(files);
     } catch (err) {
       console.error(err);
@@ -423,7 +317,11 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchSession();
+  }, [fetchSession]);
 
   return (
     <div className="w-screen h-screen bg-[#09090b] flex flex-col overflow-hidden font-sans text-zinc-300 selection:bg-blue-500/30">
@@ -438,92 +336,31 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-px bg-[#18181b] p-0.5 rounded border border-[#27272a]">
-            <input
-              placeholder="Owner"
-              className="bg-transparent text-xs px-3 py-1.5 outline-none w-24 text-zinc-300 placeholder:text-zinc-600 focus:bg-[#27272a] transition-colors rounded-sm"
-              value={owner}
-              onChange={(e) => setOwner(e.target.value)}
-            />
-            <span className="text-zinc-700">/</span>
-            <input
-              placeholder="Repo"
-              className="bg-transparent text-xs px-3 py-1.5 outline-none w-24 text-zinc-300 placeholder:text-zinc-600 focus:bg-[#27272a] transition-colors rounded-sm"
-              value={repo}
-              onChange={(e) => setRepo(e.target.value)}
-            />
-            <span className="text-zinc-700">#</span>
-            <input
-              placeholder="PR"
-              className="bg-transparent text-xs px-3 py-1.5 outline-none w-16 text-zinc-300 placeholder:text-zinc-600 focus:bg-[#27272a] transition-colors rounded-sm"
-              value={prNumber}
-              onChange={(e) => setPrNumber(e.target.value)}
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            {user ? (
-              <div className="flex items-center gap-2 bg-[#18181b] border border-[#27272a] rounded-md px-3 py-2 shadow-lg shadow-black/30">
-                <img
-                  src={user.avatar_url}
-                  alt={user.login}
-                  className="w-8 h-8 rounded-full border border-[#2f2f33]"
-                />
-                <div className="flex flex-col leading-tight">
-                  <span className="text-xs text-zinc-100 font-semibold truncate max-w-[120px]">
-                    {user.name || user.login}
-                  </span>
-                  <span className="text-[11px] text-zinc-500">
-                    @{user.login}
-                  </span>
-                </div>
-                <button
-                  className="text-zinc-500 hover:text-rose-400 transition-colors"
-                  title="Sign out"
-                  onClick={handleSignOut}
-                >
-                  <LogOut size={16} />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={handleStartOAuth}
-                disabled={authLoading}
-                className="bg-[#18181b] hover:bg-[#27272a] text-white px-4 py-2 rounded text-xs font-medium flex items-center gap-2 transition-all border border-[#27272a] shadow-lg shadow-black/20 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {authLoading ? (
-                  <Loader2 className="animate-spin" size={14} />
-                ) : (
-                  <LogIn size={14} />
-                )}
-                Sign in with GitHub
-              </button>
-            )}
-          </div>
+          {repoInfo && (
+            <div className="flex items-center gap-2 text-sm text-zinc-400">
+              <span className="text-zinc-200 font-medium">
+                {repoInfo.remote}
+              </span>
+              <span className="text-zinc-600">/</span>
+              <span className="text-zinc-200">{repoInfo.branch}</span>
+            </div>
+          )}
 
           <div className="h-6 w-px bg-[#27272a] mx-1" />
 
           <button
-            onClick={fetchPR}
-            disabled={isLoading || !token}
+            onClick={fetchSession}
+            disabled={isLoading}
             className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? (
               <Loader2 className="animate-spin" size={14} />
             ) : (
-              <ArrowRight size={14} />
+              <span>Refresh</span>
             )}
-            Load PR
           </button>
         </div>
       </div>
-
-      {authError && (
-        <div className="bg-rose-500/10 border-b border-rose-500/30 px-6 py-2 text-sm text-rose-200 flex items-center gap-2">
-          <AlertCircle size={16} />
-          <span>{authError}</span>
-        </div>
-      )}
 
       {/* Infinite Canvas Container */}
       <div
@@ -582,8 +419,7 @@ export default function App() {
               Ready to Review
             </h2>
             <p className="text-zinc-500 text-sm max-w-xs text-center leading-relaxed">
-              Sign in with GitHub, then enter a repository and pull request
-              number above to get started.
+              Run the CLI with a PR number to load data.
             </p>
             {error && (
               <div className="mt-6 flex items-center gap-2 text-rose-400 bg-rose-400/10 px-4 py-2 rounded border border-rose-400/20 shadow-sm pointer-events-auto">
