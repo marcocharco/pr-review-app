@@ -587,7 +587,7 @@ export default function App() {
       {/* Header */}
       <div
         ref={headerRef}
-        className="fixed top-4 left-4 right-4 z-50 h-16 rounded-2xl bg-zinc-900/10 backdrop-blur-md backdrop-saturate-200 shadow-[0_8px_32px_0_rgba(0,0,0,0.36),inset_0_0_0_1px_rgba(255,255,255,0.08),inset_0_1px_0_0_rgba(255,255,255,0.3),inset_0_-1px_0_0_rgba(0,0,0,0.2)] px-6 flex items-center justify-between transition-all duration-300"
+        className="fixed top-4 left-4 right-4 z-50 h-16 rounded-2xl bg-zinc-900/10 backdrop-blur-md backdrop-saturate-200 shadow-[inset_2px_2px_0px_-2px_rgba(255,255,255,0.2),inset_0_0_2px_1px_rgba(255,255,255,0.15)] px-6 flex items-center justify-between transition-all duration-300"
       >
         <div className="flex items-center gap-2 text-zinc-100 font-medium text-lg tracking-tight">
           <GitPullRequest className="text-blue-500" size={20} />
