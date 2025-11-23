@@ -553,28 +553,31 @@ export default function App() {
           <span>CanvasReview</span>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           {repoInfo && (
-            <div className="flex items-center gap-2 text-sm text-zinc-400">
-              <span className="text-zinc-200 font-medium">
-                <a
-                  href={repoInfo.remote}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-blue-400 transition-colors"
-                >
+            <a
+              href={repoInfo.remote}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="transition-colors group"
+            >
+              <div className="flex items-center gap-2 text-sm text-zinc-400 group-hover:text-blue-400">
+                <span className="text-zinc-200 font-medium group-hover:text-blue-400">
                   {repoInfo.repoName}
-                </a>
-              </span>
-              <span className="text-zinc-600">/</span>
-              <span className="text-zinc-200">{repoInfo.branch}</span>
-            </div>
+                </span>
+                <span className="text-zinc-600">/</span>
+                <span className="text-zinc-200 group-hover:text-blue-400">
+                  {repoInfo.branch}
+                </span>
+              </div>
+            </a>
           )}
 
           <button
             onClick={fetchSession}
             disabled={isLoading}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="bg-blue-600 hover:bg-blue-500 cursor-pointer text-white px-4 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ width: 80, justifyContent: "center" }}
           >
             {isLoading ? (
               <Loader2 className="animate-spin" size={14} />
