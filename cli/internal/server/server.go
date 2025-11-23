@@ -9,9 +9,14 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 
+	"github.com/marcocharco/pr-review-app/cli/internal/collect"
 	"github.com/marcocharco/pr-review-app/cli/internal/github"
+	"github.com/marcocharco/pr-review-app/cli/internal/lsp"
 	"github.com/marcocharco/pr-review-app/cli/internal/types"
 )
 
@@ -20,44 +25,138 @@ type Server struct {
 	srv     *http.Server
 }
 
-type SessionGenerator func(context.Context) (types.Session, error)
-type CommentPoster func(context.Context, github.CommentRequest) (*github.PRComment, error)
-type Merger func(context.Context, github.MergeRequest) (*github.MergeResponse, error) 
+type (
+	SessionGenerator func(context.Context) (types.Session, error)
+	CommentPoster    func(context.Context, github.CommentRequest) (*github.PRComment, error)
+	Merger           func(context.Context, github.MergeRequest) (*github.MergeResponse, error)
+)
 
 // Start serves the given session at /session and the static web assets from frontendFS at /.
 // If devMode is true, uses a fixed port (8080) for easier Vite proxying.
 func Start(ctx context.Context, generator SessionGenerator, poster CommentPoster, merger Merger, frontendFS fs.FS, devMode bool) (*Server, error) {
+	var session types.Session
+	var sessionMu sync.RWMutex
+
+	// Generate session once and store it
+	s, err := generator(ctx)
+	if err != nil {
+		return nil, err
+	}
+	session = s
+
 	mux := http.NewServeMux()
-	
-	// Helper to handle CORS in dev mode
-	handleCORS := func(w http.ResponseWriter, r *http.Request) bool {
-		if devMode {
-			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusOK)
-				return true
+
+	// CORS middleware helper
+	withCORS := func(h http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if devMode {
+				w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+				if r.Method == "OPTIONS" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
 			}
+			h(w, r)
 		}
-		return false
 	}
 
-	mux.HandleFunc("/session", func(w http.ResponseWriter, r *http.Request) {
-		if handleCORS(w, r) { return }
-
-		session, err := generator(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+	mux.HandleFunc("/session", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		sessionMu.RLock()
+		defer sessionMu.RUnlock()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(session)
-	})
+	}))
 
-	mux.HandleFunc("/comments", func(w http.ResponseWriter, r *http.Request) {
-		if handleCORS(w, r) { return }
+	mux.HandleFunc("/refresh", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 
+		newSession, err := generator(r.Context())
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to refresh session: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		sessionMu.Lock()
+		session = newSession
+		sessionMu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(session)
+	}))
+
+	mux.HandleFunc("/analyze", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			Filename string `json:"filename"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		sessionMu.RLock()
+		currentSession := session
+		sessionMu.RUnlock()
+
+		// Find the file in the session
+		var targetFiles []types.FileDiff
+		if req.Filename == "" {
+			targetFiles = currentSession.Files
+		} else {
+			for _, f := range currentSession.Files {
+				if f.Path == req.Filename {
+					targetFiles = append(targetFiles, f)
+					break
+				}
+			}
+		}
+
+		var results []types.FileDiff
+		for _, f := range targetFiles {
+			// Parse patch
+			changedLines, err := collect.ParsePatch(f.Patch)
+			if err != nil || len(changedLines) == 0 {
+				continue
+			}
+
+			// Read content
+			content, err := os.ReadFile(filepath.Join(currentSession.Repo.Root, f.Path))
+			if err != nil {
+				continue
+			}
+
+			// Analyze
+			spans, err := collect.AnalyzeFile(r.Context(), f.Path, content, changedLines)
+			if err != nil {
+				continue
+			}
+
+			// Find references
+			spans, err = lsp.FindReferences(r.Context(), currentSession.Repo.Root, spans, f.Path)
+			if err != nil {
+				log.Printf("LSP error for %s: %v", f.Path, err)
+			} else {
+				log.Printf("Found %d spans with references for %s", len(spans), f.Path)
+			}
+
+			f.ChangedSpans = spans
+			results = append(results, f)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(results)
+	}))
+
+	mux.HandleFunc("/comments", withCORS(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -82,11 +181,9 @@ func Start(ctx context.Context, generator SessionGenerator, poster CommentPoster
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(comment)
-	})
+	}))
 
-	mux.HandleFunc("/merge", func(w http.ResponseWriter, r *http.Request) {
-		if handleCORS(w, r) { return }
-
+	mux.HandleFunc("/merge", withCORS(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut && r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -112,7 +209,7 @@ func Start(ctx context.Context, generator SessionGenerator, poster CommentPoster
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
-	})
+	}))
 
 	if frontendFS != nil {
 		fileServer := http.FileServer(http.FS(frontendFS))

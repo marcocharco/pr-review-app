@@ -12,7 +12,7 @@ import {
   CheckCircle2,
   Loader2,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileNode } from "./components/FileNode";
 import type { FileData, Node, Comment, CommentType } from "./types";
 
@@ -43,7 +43,8 @@ const getRepoHttpUrl = (remote: string) => {
 
 export default function App() {
   // Data State
-  const [nodes, setNodes] = useState<Node[]>([]);
+  const [files, setFiles] = useState<FileData[]>([]);
+  const [nodeHeights, setNodeHeights] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [repoInfo, setRepoInfo] = useState<{
@@ -148,7 +149,7 @@ export default function App() {
     filePath: string,
     body: string,
     lineNumber?: number,
-    startLine?: number
+    startLine?: number,
   ) => {
     if (!repoInfo?.head) {
       console.error("No HEAD SHA available");
@@ -191,10 +192,10 @@ export default function App() {
             "Permission Error: The GitHub App or Token used does not have permission to comment on this repository.\n\n" +
               "If using a GitHub App, ensure it is installed on this repository.\n" +
               "If using a Token, ensure it has 'repo' or 'pull_requests:write' scope.\n\n" +
-              "You can manually configure a Personal Access Token in ~/.config/pr-review/apps.json"
+              "You can manually configure a Personal Access Token in ~/.config/pr-review/apps.json",
           );
           throw new Error(
-            "Permission denied: App not installed or token invalid"
+            "Permission denied: App not installed or token invalid",
           );
         }
         throw new Error(errText || "Failed to post comment");
@@ -217,7 +218,7 @@ export default function App() {
       ) {
         alert(
           "Failed to post comment: " +
-            (error instanceof Error ? error.message : String(error))
+            (error instanceof Error ? error.message : String(error)),
         );
       }
     } finally {
@@ -425,7 +426,7 @@ export default function App() {
     // Check if the event is over a scrollable element
     const targetElement = event.target as HTMLElement;
     const scrollableElement = targetElement.closest?.(
-      ".overflow-y-auto"
+      ".overflow-y-auto",
     ) as HTMLElement;
 
     // Determine gesture type on first event or if gesture state is reset
@@ -518,7 +519,7 @@ export default function App() {
       // Calculate new zoom
       const newZoom = Math.max(
         0.1,
-        Math.min(3, currentZoom - event.deltaY * ZOOM_SPEED)
+        Math.min(3, currentZoom - event.deltaY * ZOOM_SPEED),
       );
 
       // Calculate new pan to keep the point under cursor fixed
@@ -555,97 +556,208 @@ export default function App() {
 
   // --- Layout Logic ---
 
-  const processFilesToLayout = (files: FileData[]) => {
-    const COLUMNS = 3;
-    const X_SPACING = 600;
-    const Y_SPACING = 600;
+  const FILE_WIDTH = 520;
 
+  const nodes = useMemo(() => {
+    const COLUMNS = 2;
+    const X_SPACING = 1450;
+    const REF_OFFSET_X = 760;
+    const DEFAULT_FILE_HEIGHT = 600;
+    const MIN_FILE_HEIGHT = 360;
+    const DEFAULT_REF_HEIGHT = 88; // generous default to avoid initial overlap
+    const MIN_REF_HEIGHT = 72;
+    const STACK_GAP = 32;
+    const GAP_Y = 260;
+
+    const columnY = new Array(COLUMNS).fill(0);
     const newNodes: Node[] = [];
 
-    files.forEach((file: FileData, index: number) => {
+    files.forEach((file, index) => {
       const col = index % COLUMNS;
-      const row = Math.floor(index / COLUMNS);
       const x = col * X_SPACING;
-      const y = row * Y_SPACING;
+      const startY = columnY[col];
 
-      const node = {
-        id: `file-${index}`,
+      // Main file node
+      const fileNodeId = `file-${index}`;
+      const measuredFileHeight = nodeHeights[fileNodeId];
+      const fileHeight = Math.max(
+        measuredFileHeight ?? DEFAULT_FILE_HEIGHT,
+        MIN_FILE_HEIGHT,
+      );
+      newNodes.push({
+        id: fileNodeId,
         x,
-        y,
-        data: {
-          filename: file.filename,
-          status: file.status,
-          patch: file.patch,
-        },
-      };
+        y: startY,
+        data: file,
+      });
 
-      newNodes.push(node);
-    });
+      let refYOffset = 0;
+      let maxRefY = startY;
 
-    setNodes(newNodes);
-  };
+      // Process references
+      if (file.changedSpans) {
+        file.changedSpans.forEach((span, spanIndex) => {
+          if (span.references && span.references.length > 0) {
+            span.references.forEach((ref, refIndex) => {
+              const refNodeId = `ref-${index}-${spanIndex}-${refIndex}`;
+              const measuredRefHeight = nodeHeights[refNodeId];
+              const refHeight = Math.max(
+                measuredRefHeight ?? DEFAULT_REF_HEIGHT,
+                MIN_REF_HEIGHT,
+              );
+              const refY = startY + refYOffset;
 
-  // --- Session Fetch ---
+              newNodes.push({
+                id: refNodeId,
+                x: x + REF_OFFSET_X,
+                y: refY,
+                data: {
+                  filename: ref.path,
+                  status: "related",
+                  context: ref.context,
+                  referenceLine: ref.line,
+                },
+              });
 
-  const fetchSession = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    setNodes([]);
-    setPan({ x: 100, y: 100 });
-    setZoom(1);
-
-    try {
-      const response = await fetch("/session");
-
-      if (!response.ok) {
-        throw new Error(
-          `Failed to fetch session: ${response.status} ${response.statusText}`
-        );
-      }
-
-      const session = await response.json();
-
-      if (session.repo) {
-        setRepoInfo({
-          remote: session.repo.remote,
-          branch: session.repo.branch,
-          repoName: session.repo.repoName,
-          head: session.repo.head,
-          prTitle: session.repo.prTitle,
-          prNumber: session.repo.prNumber,
-          prLink: session.repo.prLink,
-          prStatus: session.repo.prStatus,
-          repoLink: session.repo.repoLink,
+              refYOffset += refHeight + STACK_GAP; // stack with breathing room
+              maxRefY = Math.max(maxRefY, refY + refHeight);
+            });
+          }
         });
       }
 
-      // Map session files to FileData
-      const files: FileData[] = session.files.map(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (f: { path: string; status: any; patch: string }) => ({
-          filename: f.path,
-          status: f.status,
-          patch: f.patch,
-        })
-      );
+      const totalHeight = Math.max(fileHeight, maxRefY - startY);
+      columnY[col] += totalHeight + GAP_Y;
+    });
 
-      // Process comments
-      if (session.comments) {
-        setComments(processComments(session.comments));
-      } else {
-        setComments([]);
+    return newNodes;
+  }, [files, nodeHeights]);
+
+  const handleNodeSize = useCallback((id: string, height: number) => {
+    setNodeHeights((prev) => {
+      if (prev[id] === height) return prev;
+      return { ...prev, [id]: height };
+    });
+  }, []);
+
+  // --- Session Fetch ---
+
+  const analyzeFile = async (filename?: string) => {
+    try {
+      const response = await fetch("/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename }),
+      });
+
+      if (!response.ok) return;
+
+      const rawFiles = await response.json();
+      const updatedFiles: FileData[] = rawFiles.map((f: any) => ({
+        filename: f.path,
+        status: f.status,
+        patch: f.patch,
+        changedSpans: f.changedSpans ?? [],
+        referencesChecked: true,
+      }));
+
+      // Merge updated files into existing files
+      setFiles((prevFiles) => {
+        const nextFiles = [...prevFiles];
+        updatedFiles.forEach((update) => {
+          const idx = nextFiles.findIndex(
+            (f) => f.filename === update.filename,
+          );
+          if (idx !== -1) {
+            nextFiles[idx] = {
+              ...nextFiles[idx],
+              patch: update.patch,
+              changedSpans: update.changedSpans,
+              referencesChecked: true,
+            };
+          }
+        });
+        return nextFiles;
+      });
+    } catch (err) {
+      console.error("Analysis failed:", err);
+    }
+  };
+
+  const fetchSession = useCallback(
+    async (refresh = false) => {
+      setIsLoading(true);
+      setError(null);
+      if (!refresh) {
+        setFiles([]);
+        setNodeHeights({});
+        setPan({ x: 100, y: 100 });
+        setZoom(1);
       }
 
-      processFilesToLayout(files);
-    } catch (err) {
-      console.error(err);
-      setError(
-        err instanceof Error ? err.message : "An unknown error occurred"
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, [processComments]);
+      try {
+        const endpoint = refresh ? "/refresh" : "/session";
+        const method = refresh ? "POST" : "GET";
+        const response = await fetch(endpoint, { method });
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch session: ${response.status} ${response.statusText}`,
+          );
+        }
+
+        const session = await response.json();
+
+        if (session.repo) {
+          setRepoInfo({
+            remote: session.repo.remote,
+            branch: session.repo.branch,
+            repoName: session.repo.repoName,
+            head: session.repo.head,
+            prTitle: session.repo.prTitle,
+            prNumber: session.repo.prNumber,
+            prLink: session.repo.prLink,
+            prStatus: session.repo.prStatus,
+            repoLink: session.repo.repoLink,
+          });
+        }
+
+        // Map session files to FileData
+        const files: FileData[] = session.files.map(
+          (f: {
+            path: string;
+            status: any;
+            patch: string;
+            changedSpans?: any[];
+          }) => ({
+            filename: f.path,
+            status: f.status,
+            patch: f.patch,
+            changedSpans: f.changedSpans,
+            referencesChecked: Array.isArray(f.changedSpans),
+          }),
+        );
+
+        // Process comments
+        if (session.comments) {
+          setComments(processComments(session.comments));
+        } else {
+          setComments([]);
+        }
+
+        setNodeHeights({});
+        setFiles(files);
+      } catch (err) {
+        console.error(err);
+        setError(
+          err instanceof Error ? err.message : "An unknown error occurred",
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [processComments],
+  );
 
   useEffect(() => {
     fetchSession();
@@ -685,10 +797,10 @@ export default function App() {
                         repoInfo.prStatus === "merged"
                           ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
                           : repoInfo.prStatus === "closed"
-                          ? "bg-red-500/10 text-red-400 border-red-500/20"
-                          : repoInfo.prStatus === "draft"
-                          ? "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
-                          : "bg-green-500/10 text-green-400 border-green-500/20"
+                            ? "bg-red-500/10 text-red-400 border-red-500/20"
+                            : repoInfo.prStatus === "draft"
+                              ? "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
+                              : "bg-green-500/10 text-green-400 border-green-500/20"
                       }`}
                     >
                       {repoInfo.prStatus === "merged" ? (
@@ -740,7 +852,14 @@ export default function App() {
           )}
 
           <button
-            onClick={fetchSession}
+            onClick={() => analyzeFile()}
+            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-4 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-all border border-zinc-700"
+          >
+            <span>Analyze All</span>
+          </button>
+
+          <button
+            onClick={() => fetchSession(true)}
             disabled={isLoading}
             className="bg-blue-600 hover:bg-blue-500 cursor-pointer text-white px-4 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ width: 80, justifyContent: "center" }}
@@ -765,7 +884,6 @@ export default function App() {
             touchAction: "none",
             overscrollBehavior: "contain",
             userSelect: "none",
-            onMouseDown: handleMouseDown,
           } as React.CSSProperties
         }
         onMouseDown={handleMouseDown}
@@ -789,12 +907,55 @@ export default function App() {
           }}
           className="absolute top-0 left-0 w-0 h-0 pointer-events-none"
         >
+          {/* Edges Layer */}
+          <svg
+            className="absolute top-0 left-0 overflow-visible pointer-events-none"
+            style={{ width: 1, height: 1 }}
+          >
+            {nodes.map((node) => {
+              if (node.data.status !== "related") return null;
+              // Find parent node
+              // ID format: ref-{fileIndex}-{spanIndex}-{refIndex}
+              const parts = node.id.split("-");
+              if (parts.length !== 4) return null;
+              const fileIndex = parts[1];
+              const parentId = `file-${fileIndex}`;
+              const parentNode = nodes.find((n) => n.id === parentId);
+
+              if (!parentNode) return null;
+
+              // Draw curve from right side of parent to left side of child
+              const startX = parentNode.x + FILE_WIDTH - 6;
+              const startYBase = parentNode.y + 24; // Middle of header approx
+              const endX = node.x;
+              const endY = node.y + 22;
+
+              const controlX1 = startX + 110;
+              const controlX2 = endX - 90;
+              const startY = startYBase; // small stagger unnecessary for single set per file
+
+              return (
+                <path
+                  key={`edge-${node.id}`}
+                  d={`M ${startX} ${startY} C ${controlX1} ${startY}, ${controlX2} ${endY}, ${endX} ${endY}`}
+                  fill="none"
+                  stroke="#3f3f46"
+                  strokeWidth="2"
+                  strokeDasharray="4"
+                  strokeLinecap="round"
+                />
+              );
+            })}
+          </svg>
+
           {/* Nodes Layer */}
           <div className="pointer-events-auto">
             {nodes.map((node) => (
               <FileNode
                 key={node.id}
                 node={node}
+                zoom={zoom}
+                onAnalyze={analyzeFile}
                 style={{
                   transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
                   willChange: "transform",
@@ -806,6 +967,7 @@ export default function App() {
                 onReplyComment={handleReplyComment}
                 isSubmitting={isPosting}
                 currentUser="user" // Placeholder
+                onSize={handleNodeSize}
               />
             ))}
           </div>

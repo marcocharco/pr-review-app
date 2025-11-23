@@ -5,24 +5,10 @@ import { getFileIcon, getStatusColor } from "../utils/fileUtils";
 import { CommentThread } from "./CommentThread";
 import { CommentInput } from "./CommentInput";
 
-interface FileNodeWithCommentsProps extends FileNodeProps {
-  comments?: Comment[];
-  onAddComment?: (
-    filePath: string,
-    body: string,
-    lineNumber?: number,
-    startLine?: number
-  ) => Promise<void>;
-  onEditComment?: (commentId: number, body: string) => Promise<void>;
-  onDeleteComment?: (commentId: number) => Promise<void>;
-  onReplyComment?: (inReplyToId: number, body: string) => Promise<void>;
-  isSubmitting?: boolean;
-  currentUser?: string;
-}
-
 export const FileNode = ({
   node,
   style,
+  zoom,
   comments = [],
   onAddComment,
   onEditComment,
@@ -30,12 +16,24 @@ export const FileNode = ({
   onReplyComment,
   isSubmitting = false,
   currentUser,
-}: FileNodeWithCommentsProps) => {
-  const [expanded, setExpanded] = useState(true);
+  onAnalyze,
+  onSize,
+}: FileNodeProps) => {
+  const { data } = node;
+  // Start minimized if related, otherwise expanded
+  const [expanded, setExpanded] = useState(data.status !== "related");
   const [showCommentInput, setShowCommentInput] = useState(false);
   const [commentingLine, setCommentingLine] = useState<number | null>(null);
   const [expandedCommentLines, setExpandedCommentLines] = useState<Set<number>>(
-    new Set()
+    new Set(),
+  );
+  const rootRef = useRef<HTMLDivElement>(null);
+  const hasAnyReferences = useMemo(
+    () =>
+      data.changedSpans?.some(
+        (span) => span.references && span.references.length > 0,
+      ) ?? false,
+    [data.changedSpans],
   );
 
   useEffect(() => {
@@ -59,10 +57,11 @@ export const FileNode = ({
   } | null>(null);
   const diffContentRef = useRef<HTMLDivElement>(null);
 
-  const { data } = node;
-
   // Parse diff to extract line numbers and hunk information
   const parsedDiff = useMemo(() => {
+    if (data.status === "related" && data.context) {
+      return { lines: data.context.split("\n"), lineNumbers: new Map() };
+    }
     if (!data.patch)
       return { lines: [], lineNumbers: new Map<number, number>() };
 
@@ -93,7 +92,7 @@ export const FileNode = ({
     });
 
     return { lines, lineNumbers };
-  }, [data.patch]);
+  }, [data.patch, data.context, data.status]);
 
   // Group comments by line number
   const commentsByLine = useMemo(() => {
@@ -169,11 +168,11 @@ export const FileNode = ({
         data.filename,
         body,
         textSelection.endLine,
-        textSelection.startLine
+        textSelection.startLine,
       );
       // For text selection, we might want to expand the end line or start line
       setExpandedCommentLines((prev) =>
-        new Set(prev).add(textSelection.endLine)
+        new Set(prev).add(textSelection.endLine),
       );
     } else {
       // File-level comment
@@ -195,6 +194,25 @@ export const FileNode = ({
     await onDeleteComment(commentId);
   };
 
+  // Report node height so the canvas can reflow around expand/collapse
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || !onSize) return;
+
+    const sendHeight = () => {
+      const height = Math.round(el.getBoundingClientRect().height / zoom);
+      onSize(node.id, height);
+    };
+
+    sendHeight();
+    requestAnimationFrame(sendHeight);
+
+    const observer = new ResizeObserver(() => sendHeight());
+    observer.observe(el);
+
+    return () => observer.disconnect();
+  }, [node.id, onSize, expanded, zoom]);
+
   const getCommentCountForLine = (lineNumber: number | null): number => {
     if (lineNumber === null) return 0;
     const lineComments = commentsByLine.get(lineNumber) || [];
@@ -205,10 +223,13 @@ export const FileNode = ({
 
   return (
     <div
+      ref={rootRef}
       style={style}
       className={`absolute rounded-md border border-[#27272a] bg-[#18181b] w-[500px] shadow-2xl shadow-black/50 flex flex-col transition-all duration-200 ${
         expanded ? "h-auto" : "h-12 overflow-hidden"
-      } ${data.status === "removed" ? "opacity-60" : ""}`}
+      } ${data.status === "removed" ? "opacity-60" : ""} ${
+        data.status === "related" ? "border-zinc-700 border-dashed" : ""
+      }`}
     >
       {/* Header */}
       <div
@@ -218,7 +239,7 @@ export const FileNode = ({
         <div className="flex items-center gap-3 overflow-hidden">
           <div
             className={`w-6 h-6 flex items-center justify-center rounded text-[10px] font-bold font-mono tracking-tighter ${getStatusColor(
-              data.status
+              data.status,
             )}`}
           >
             {getFileIcon(data.filename)}
@@ -230,6 +251,11 @@ export const FileNode = ({
             >
               {data.filename}
             </span>
+            {data.status === "related" && data.referenceLine && (
+              <span className="text-[10px] text-zinc-500 font-mono">
+                Line {data.referenceLine}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -241,7 +267,7 @@ export const FileNode = ({
           )}
           <span
             className={`text-[10px] px-2 py-0.5 rounded font-medium uppercase tracking-wider ${getStatusColor(
-              data.status
+              data.status,
             )}`}
           >
             {data.status}
@@ -253,6 +279,33 @@ export const FileNode = ({
           )}
         </div>
       </div>
+
+      {/* Analyze Button for main files */}
+      {expanded &&
+        data.status !== "related" &&
+        onAnalyze &&
+        !data.referencesChecked && (
+          <div className="px-4 py-2 border-b border-[#27272a] bg-[#18181b]">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onAnalyze(data.filename);
+              }}
+              className="text-[10px] bg-blue-900/30 text-blue-400 hover:bg-blue-900/50 px-2 py-1 rounded border border-blue-900/50 transition-colors w-full"
+            >
+              Find References
+            </button>
+          </div>
+        )}
+
+      {expanded &&
+        data.status !== "related" &&
+        data.referencesChecked &&
+        !hasAnyReferences && (
+          <div className="px-4 py-2 border-b border-[#27272a] bg-[#18181b] text-[11px] text-zinc-400">
+            No references found for this file.
+          </div>
+        )}
 
       {expanded && (
         <>
@@ -281,6 +334,19 @@ export const FileNode = ({
           >
             <div className="py-2">
               {parsedDiff.lines.map((line: string, i: number) => {
+                if (data.status === "related") {
+                  return (
+                    <div
+                      key={i}
+                      className="px-4 py-0.5 whitespace-pre w-full border-l-2 border-transparent hover:bg-zinc-800/30"
+                    >
+                      <span className="text-zinc-400 inline-block w-full">
+                        {line}
+                      </span>
+                    </div>
+                  );
+                }
+
                 const lineNumber = parsedDiff.lineNumbers.get(i) || null;
                 const commentCount = getCommentCountForLine(lineNumber);
                 const hasComments = commentCount > 0;
@@ -314,7 +380,7 @@ export const FileNode = ({
                       className={`${bgClass} flex items-start gap-2 py-0.5 w-full border-l-2 ${borderClass} hover:bg-opacity-40 transition-colors relative`}
                     >
                       {/* Line number / Add Comment Button */}
-                      <div className="flex-shrink-0 w-12 flex items-center justify-end pr-3 relative border-r border-[#27272a]/50">
+                      <div className="shrink-0 w-12 flex items-center justify-end pr-3 relative border-r border-[#27272a]/50">
                         {lineNumber !== null ? (
                           <>
                             {/* Line Number / Marker */}
