@@ -616,6 +616,11 @@ export default function App() {
                   status: "related",
                   context: ref.context,
                   referenceLine: ref.line,
+                  referenceStart: ref.start,
+                  referenceEnd: ref.end,
+                  contextStartLine: ref.contextStartLine,
+                  changedSpans: [],
+                  referencesChecked: true,
                 },
               });
 

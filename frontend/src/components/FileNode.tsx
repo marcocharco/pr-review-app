@@ -68,9 +68,13 @@ export const FileNode = ({
   // Parse diff to extract line numbers and hunk information
   const parsedDiff = useMemo(() => {
     if (data.status === "related" && data.context) {
+      const lines = data.context.split("\n");
+      const lineNumbers = new Map<number, number>();
+      const startLine = data.contextStartLine || 1;
+      lines.forEach((_, i) => lineNumbers.set(i, startLine + i));
       return {
-        lines: data.context.split("\n"),
-        lineNumbers: new Map<number, number>(),
+        lines,
+        lineNumbers,
         wordDiffs: new Map<number, Change[]>(),
       };
     }
@@ -435,16 +439,29 @@ export const FileNode = ({
                 if (data.status === "related") {
                   const highlighted =
                     highlightedLines[i] ?? escapeHtml(displayLine);
+                  
+                  const lineNumber = parsedDiff.lineNumbers.get(i) || i + 1;
+                  const isRefLine = lineNumber === data.referenceLine;
+
                   return (
                     <div
                       key={i}
-                      className="px-4 py-0.5 whitespace-pre w-full border-l-2 border-transparent hover:bg-zinc-800/30"
+                      className={`flex items-start gap-2 py-0.5 w-full border-l-2 ${
+                        isRefLine 
+                          ? "bg-blue-900/20 border-blue-500/50" 
+                          : "border-transparent hover:bg-zinc-800/30"
+                      }`}
                     >
-                      <span
-                        className="hljs text-zinc-400 inline-block w-full whitespace-pre break-all"
-                        style={{ background: "transparent" }}
-                        dangerouslySetInnerHTML={{ __html: highlighted }}
-                      />
+                      <div className="shrink-0 w-12 flex items-center justify-end pr-3 select-none text-zinc-600 text-[10px] font-mono border-r border-[#27272a]/50 mr-2">
+                        {lineNumber}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span
+                          className="hljs text-zinc-400 inline-block w-full whitespace-pre break-all"
+                          style={{ background: "transparent" }}
+                          dangerouslySetInnerHTML={{ __html: highlighted }}
+                        />
+                      </div>
                     </div>
                   );
                 }

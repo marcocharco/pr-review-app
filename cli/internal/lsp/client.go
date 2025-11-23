@@ -353,19 +353,21 @@ func FindReferences(ctx context.Context, root string, spans []types.ChangedSpan,
 
 			// Read context
 			var contextLines []string
+			var startLine int
 			if content, err := os.ReadFile(filepath.Join(root, refPath)); err == nil {
 				lines := strings.Split(string(content), "\n")
-				startLine := max(loc.Range.Start.Line-3, 0)
+				startLine = max(loc.Range.Start.Line-3, 0)
 				endLine := min(loc.Range.Start.Line+3, len(lines))
 				contextLines = lines[startLine:endLine]
 			}
 
 			spans[i].References = append(spans[i].References, types.Reference{
-				Path:    refPath,
-				Line:    loc.Range.Start.Line + 1,
-				Start:   loc.Range.Start.Character,
-				End:     loc.Range.End.Character,
-				Context: strings.Join(contextLines, "\n"),
+				Path:             refPath,
+				Line:             loc.Range.Start.Line + 1,
+				Start:            loc.Range.Start.Character,
+				End:              loc.Range.End.Character,
+				Context:          strings.Join(contextLines, "\n"),
+				ContextStartLine: startLine + 1,
 			})
 		}
 	}

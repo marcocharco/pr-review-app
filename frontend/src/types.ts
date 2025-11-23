@@ -11,6 +11,7 @@ export interface Reference {
   start: number;
   end: number;
   context: string;
+  contextStartLine: number;
 }
 
 export interface ChangedSpan {
@@ -32,6 +33,9 @@ export interface FileData {
   // For related files
   context?: string;
   referenceLine?: number;
+  referenceStart?: number;
+  referenceEnd?: number;
+  contextStartLine?: number;
 }
 
 export interface Node {

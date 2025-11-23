@@ -33,6 +33,7 @@ type Reference struct {
 	Start   int    `json:"start"`
 	End     int    `json:"end"`
 	Context string `json:"context"`
+	ContextStartLine int `json:"contextStartLine"`
 }
 
 // FileDiff captures a single file's patch and current content.
