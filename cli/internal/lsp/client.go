@@ -174,6 +174,54 @@ func (c *Client) Close() error {
 	return c.cmd.Wait()
 }
 
+var (
+	clientsMu sync.Mutex
+	clients   = make(map[string]*Client)
+)
+
+func GetClient(root, lang string) (*Client, error) {
+	clientsMu.Lock()
+	defer clientsMu.Unlock()
+
+	key := root + "|" + lang
+	if c, ok := clients[key]; ok {
+		return c, nil
+	}
+
+	var cmd string
+	var args []string
+
+	if lang == "go" {
+		cmd = "gopls"
+	} else if lang == "ts" || lang == "js" {
+		cmd = "typescript-language-server"
+		args = []string{"--stdio"}
+	} else {
+		return nil, fmt.Errorf("unsupported language: %s", lang)
+	}
+
+	client, err := NewClient(cmd, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Initialize
+	initParams := InitializeParams{
+		ProcessID:    os.Getpid(),
+		RootURI:      URIFromFile(root),
+		Capabilities: map[string]interface{}{},
+	}
+
+	if _, err := client.Call("initialize", initParams); err != nil {
+		client.Close()
+		return nil, fmt.Errorf("failed to initialize lsp: %w", err)
+	}
+	client.Notify("initialized", struct{}{})
+
+	clients[key] = client
+	return client, nil
+}
+
 type InitializeParams struct {
 	ProcessID    int            `json:"processId"`
 	RootURI      string         `json:"rootUri"`
@@ -218,37 +266,20 @@ func FileFromURI(uri string) string {
 }
 
 func FindReferences(ctx context.Context, root string, spans []types.ChangedSpan, filePath string) ([]types.ChangedSpan, error) {
-	// Determine which LSP to use
-	var cmd string
-	var args []string
-
+	// Determine language
+	var lang string
 	if strings.HasSuffix(filePath, ".go") {
-		cmd = "gopls"
+		lang = "go"
 	} else if strings.HasSuffix(filePath, ".ts") || strings.HasSuffix(filePath, ".tsx") || strings.HasSuffix(filePath, ".js") {
-		// or vtsls
-		cmd = "typescript-language-server"
-		args = []string{"--stdio"}
+		lang = "ts"
 	} else {
 		return spans, nil
 	}
 
-	client, err := NewClient(cmd, args...)
+	client, err := GetClient(root, lang)
 	if err != nil {
-		return spans, fmt.Errorf("failed to start lsp: %w", err)
+		return spans, fmt.Errorf("failed to get lsp client: %w", err)
 	}
-	defer client.Close()
-
-	// Initialize
-	initParams := InitializeParams{
-		ProcessID:    os.Getpid(),
-		RootURI:      URIFromFile(root),
-		Capabilities: map[string]any{},
-	}
-
-	if _, err := client.Call("initialize", initParams); err != nil {
-		return spans, fmt.Errorf("failed to initialize lsp: %w", err)
-	}
-	client.Notify("initialized", struct{}{})
 
 	// Open the file (optional if on disk, but good practice)
 	content, err := os.ReadFile(filepath.Join(root, filePath))
@@ -268,7 +299,7 @@ func FindReferences(ctx context.Context, root string, spans []types.ChangedSpan,
 				Text       string `json:"text"`
 			}{
 				URI:        URIFromFile(filepath.Join(root, filePath)),
-				LanguageID: "go", // simplify
+				LanguageID: lang,
 				Version:    1,
 				Text:       string(content),
 			},
@@ -303,11 +334,29 @@ func FindReferences(ctx context.Context, root string, spans []types.ChangedSpan,
 		}
 
 		for _, loc := range locations {
+			refPath := FileFromURI(loc.URI)
+
+			// Make path relative to root
+			relPath, err := filepath.Rel(root, refPath)
+			if err == nil {
+				refPath = relPath
+			}
+
+			// Read context
+			var contextLines []string
+			if content, err := os.ReadFile(filepath.Join(root, refPath)); err == nil {
+				lines := strings.Split(string(content), "\n")
+				startLine := max(loc.Range.Start.Line-3, 0)
+				endLine := min(loc.Range.Start.Line+3, len(lines))
+				contextLines = lines[startLine:endLine]
+			}
+
 			spans[i].References = append(spans[i].References, types.Reference{
-				Path:  FileFromURI(loc.URI),
-				Line:  loc.Range.Start.Line + 1,
-				Start: loc.Range.Start.Character,
-				End:   loc.Range.End.Character,
+				Path:    refPath,
+				Line:    loc.Range.Start.Line + 1,
+				Start:   loc.Range.Start.Character,
+				End:     loc.Range.End.Character,
+				Context: strings.Join(contextLines, "\n"),
 			})
 		}
 	}
