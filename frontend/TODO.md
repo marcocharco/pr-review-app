@@ -1,9 +1,9 @@
-- [] gh auth
+- [x] gh auth
 - [] commenting, merging
 - [] better diffs
 - [] better linking
 - [] syntax highlighting
-- [] zoom and scroll
+- [x] zoom and scroll
 
 optional:
 

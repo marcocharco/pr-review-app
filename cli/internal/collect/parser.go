@@ -99,12 +99,22 @@ func AnalyzeFile(ctx context.Context, filePath string, content []byte, changedLi
 			}
 			seen[key] = true
 
-			name := getNodeName(content, symbolNode)
+			name, nameNode := getNodeName(content, symbolNode)
+
+			refLine := 0
+			refCol := 0
+			if nameNode != nil {
+				refLine = int(nameNode.StartPoint().Row)
+				refCol = int(nameNode.StartPoint().Column)
+			}
+
 			spans = append(spans, types.ChangedSpan{
-				Name:  name,
-				Kind:  symbolNode.Type(),
-				Start: int(symbolNode.StartPoint().Row) + 1,
-				End:   int(symbolNode.EndPoint().Row) + 1,
+				Name:    name,
+				Kind:    symbolNode.Type(),
+				Start:   int(symbolNode.StartPoint().Row) + 1,
+				End:     int(symbolNode.EndPoint().Row) + 1,
+				RefLine: refLine,
+				RefCol:  refCol,
 			})
 		}
 	}
@@ -170,7 +180,7 @@ func findEnclosingSymbol(node *sitter.Node) *sitter.Node {
 	return nil
 }
 
-func getNodeName(content []byte, node *sitter.Node) string {
+func getNodeName(content []byte, node *sitter.Node) (string, *sitter.Node) {
 	// Try to find a child named "name" or similar
 	// This is language specific.
 
@@ -179,14 +189,14 @@ func getNodeName(content []byte, node *sitter.Node) string {
 	case "function_declaration", "method_declaration", "type_spec",
 		"class_declaration", "interface_declaration", "method_definition", "variable_declarator":
 		if nameNode := node.ChildByFieldName("name"); nameNode != nil {
-			return nameNode.Content(content)
+			return nameNode.Content(content), nameNode
 		}
 	}
 
 	// Fallback: try "name" field
 	if nameNode := node.ChildByFieldName("name"); nameNode != nil {
-		return nameNode.Content(content)
+		return nameNode.Content(content), nameNode
 	}
 
-	return node.Type() // Fallback
+	return node.Type(), nil // Fallback
 }
