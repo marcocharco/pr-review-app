@@ -1,12 +1,18 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, Minimize2 } from "lucide-react";
 import type { FileNodeProps } from "../types";
 import { getFileIcon, getStatusColor } from "../utils/fileUtils";
 
-export const FileNode = ({ node, style, onAnalyze }: FileNodeProps) => {
+export const FileNode = ({
+  node,
+  style,
+  onAnalyze,
+  onSize,
+}: FileNodeProps) => {
   const { data } = node;
   // Start minimized if related, otherwise expanded
   const [expanded, setExpanded] = useState(data.status !== "related");
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const diffLines = useMemo(() => {
     if (data.status === "related" && data.context) {
@@ -16,8 +22,29 @@ export const FileNode = ({ node, style, onAnalyze }: FileNodeProps) => {
     return data.patch.split("\n");
   }, [data.patch, data.context, data.status]);
 
+  // Report node height so the canvas can reflow around expand/collapse
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || !onSize) return;
+
+    const updateSize = () => {
+      const height = Math.round(el.getBoundingClientRect().height);
+      onSize(node.id, height);
+    };
+
+    updateSize();
+
+    const observer = new ResizeObserver(() => updateSize());
+    observer.observe(el);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [node.id, onSize]);
+
   return (
     <div
+      ref={rootRef}
       style={style}
       className={`absolute rounded-md border border-[#27272a] bg-[#18181b] w-[500px] shadow-2xl shadow-black/50 flex flex-col transition-all duration-200 ${
         expanded ? "h-auto" : "h-12 overflow-hidden"

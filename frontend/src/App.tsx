@@ -1,11 +1,77 @@
 import { AlertCircle, GitPullRequest, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { FileNode } from "./components/FileNode";
 import type { FileData, Node } from "./types";
 
 export default function App() {
   // Data State
-  const [nodes, setNodes] = useState<Node[]>([]);
+  const [files, setFiles] = useState<FileData[]>([]);
+  const [nodeHeights, setNodeHeights] = useState<Record<string, number>>({});
+
+  // Layout Logic
+  const nodes = useMemo(() => {
+    const COLUMNS = 2;
+    const X_SPACING = 1050;
+    const REF_OFFSET_X = 450;
+    const DEFAULT_FILE_HEIGHT = 420;
+    const DEFAULT_REF_HEIGHT = 56; // collapsed related card height
+    const GAP_Y = 120;
+
+    const columnY = new Array(COLUMNS).fill(0);
+    const newNodes: Node[] = [];
+
+    files.forEach((file, index) => {
+      const col = index % COLUMNS;
+      const x = col * X_SPACING;
+      const startY = columnY[col];
+
+      // Main file node
+      const fileNodeId = `file-${index}`;
+      const fileHeight = nodeHeights[fileNodeId] ?? DEFAULT_FILE_HEIGHT;
+      newNodes.push({
+        id: fileNodeId,
+        x,
+        y: startY,
+        data: file,
+      });
+
+      let refYOffset = 0;
+      let maxRefY = startY;
+
+      // Process references
+      if (file.changedSpans) {
+        file.changedSpans.forEach((span, spanIndex) => {
+          if (span.references && span.references.length > 0) {
+            span.references.forEach((ref, refIndex) => {
+              const refNodeId = `ref-${index}-${spanIndex}-${refIndex}`;
+              const refHeight = nodeHeights[refNodeId] ?? DEFAULT_REF_HEIGHT;
+              const refY = startY + refYOffset;
+
+              newNodes.push({
+                id: refNodeId,
+                x: x + REF_OFFSET_X,
+                y: refY,
+                data: {
+                  filename: ref.path,
+                  status: "related",
+                  context: ref.context,
+                  referenceLine: ref.line,
+                },
+              });
+
+              refYOffset += refHeight; // stack tightly; expansion pushes next refs down
+              maxRefY = Math.max(maxRefY, refY + refHeight);
+            });
+          }
+        });
+      }
+
+      const totalHeight = Math.max(fileHeight, maxRefY - startY);
+      columnY[col] += totalHeight + GAP_Y;
+    });
+
+    return newNodes;
+  }, [files, nodeHeights]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [repoInfo, setRepoInfo] = useState<{
@@ -38,6 +104,13 @@ export default function App() {
   // --- Canvas Logic ---
 
   const lastMousePosRef = useRef<{ x: number; y: number } | null>(null);
+
+  const handleNodeSize = useCallback((id: string, height: number) => {
+    setNodeHeights((prev) => {
+      if (prev[id] === height) return prev;
+      return { ...prev, [id]: height };
+    });
+  }, []);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
@@ -243,59 +316,6 @@ export default function App() {
     }
   }, [handleWheel]);
 
-  // --- Layout Logic ---
-
-  const processFilesToLayout = (files: FileData[]) => {
-    const COLUMNS = 3;
-    const X_SPACING = 600;
-    const Y_SPACING = 600;
-
-    const newNodes: Node[] = [];
-
-    files.forEach((file: FileData, index: number) => {
-      const col = index % COLUMNS;
-      const row = Math.floor(index / COLUMNS);
-      const x = col * X_SPACING;
-      const y = row * Y_SPACING;
-
-      const node = {
-        id: `file-${index}`,
-        x,
-        y,
-        data: file,
-      };
-
-      newNodes.push(node);
-
-      // Process references
-      if (file.changedSpans) {
-        file.changedSpans.forEach((span, spanIndex) => {
-          if (span.references) {
-            span.references.forEach((ref, refIndex) => {
-              // Create a node for the reference
-              // Position it to the right of the source file
-              // Stagger them vertically if multiple
-              const refNode: Node = {
-                id: `ref-${index}-${spanIndex}-${refIndex}`,
-                x: x + X_SPACING * 0.8, // Offset to the right
-                y: y + (refIndex + 1) * 100, // Offset down
-                data: {
-                  filename: ref.path,
-                  status: "related",
-                  context: ref.context,
-                  referenceLine: ref.line,
-                },
-              };
-              newNodes.push(refNode);
-            });
-          }
-        });
-      }
-    });
-
-    setNodes(newNodes);
-  };
-
   // --- Session Fetch ---
 
   const analyzeFile = async (filename?: string) => {
@@ -316,63 +336,22 @@ export default function App() {
         changedSpans: f.changedSpans,
       }));
 
-      // Merge updated files into existing nodes
-      setNodes((prevNodes) => {
-        const nextNodes = [...prevNodes];
-        const X_SPACING = 600;
-
-        updatedFiles.forEach((file) => {
-          // Find existing file node
-          const fileNodeIndex = nextNodes.findIndex(
-            (n) => n.data.filename === file.filename && n.data.status !== "related",
+      // Merge updated files into existing files
+      setFiles((prevFiles) => {
+        const nextFiles = [...prevFiles];
+        updatedFiles.forEach((update) => {
+          const idx = nextFiles.findIndex(
+            (f) => f.filename === update.filename,
           );
-
-          if (fileNodeIndex === -1) return;
-
-          // Update file data
-          nextNodes[fileNodeIndex] = {
-            ...nextNodes[fileNodeIndex],
-            data: {
-              ...nextNodes[fileNodeIndex].data,
-              changedSpans: file.changedSpans,
-            },
-          };
-
-          const fileNode = nextNodes[fileNodeIndex];
-          const x = fileNode.x;
-          const y = fileNode.y;
-          
-          // Extract the numeric index from the file node ID (e.g. "file-0" -> "0")
-          const fileIdParts = fileNode.id.split("-");
-          const fileIndexId = fileIdParts[1];
-
-          // Add reference nodes
-          if (file.changedSpans) {
-            file.changedSpans.forEach((span, spanIndex) => {
-              if (span.references) {
-                span.references.forEach((ref, refIndex) => {
-                  // Check if ref node already exists
-                  const refId = `ref-${fileIndexId}-${spanIndex}-${refIndex}`;
-                  if (nextNodes.some((n) => n.id === refId)) return;
-
-                  const refNode: Node = {
-                    id: refId,
-                    x: x + X_SPACING * 0.8,
-                    y: y + (refIndex + 1) * 100, // Initial stack
-                    data: {
-                      filename: ref.path,
-                      status: "related",
-                      context: ref.context,
-                      referenceLine: ref.line,
-                    },
-                  };
-                  nextNodes.push(refNode);
-                });
-              }
-            });
+          if (idx !== -1) {
+            nextFiles[idx] = {
+              ...nextFiles[idx],
+              patch: update.patch,
+              changedSpans: update.changedSpans,
+            };
           }
         });
-        return nextNodes;
+        return nextFiles;
       });
     } catch (err) {
       console.error("Analysis failed:", err);
@@ -383,7 +362,7 @@ export default function App() {
     setIsLoading(true);
     setError(null);
     if (!refresh) {
-      setNodes([]);
+      setFiles([]);
       setPan({ x: 100, y: 100 });
       setZoom(1);
     }
@@ -424,7 +403,8 @@ export default function App() {
         }),
       );
 
-      processFilesToLayout(files);
+      setNodeHeights({});
+      setFiles(files);
     } catch (err) {
       console.error(err);
       setError(
@@ -525,31 +505,36 @@ export default function App() {
           className="absolute top-0 left-0 w-0 h-0 pointer-events-none"
         >
           {/* Edges Layer */}
-          <svg className="absolute top-0 left-0 overflow-visible pointer-events-none" style={{ width: 1, height: 1 }}>
-            {nodes.map((node) => {
-              if (node.data.status !== "related") return null;
-              // Find parent node
-              // ID format: ref-{fileIndex}-{spanIndex}-{refIndex}
-              const parts = node.id.split("-");
-              if (parts.length !== 4) return null;
-              const fileIndex = parts[1];
-              const parentId = `file-${fileIndex}`;
-              const parentNode = nodes.find((n) => n.id === parentId);
-              
-              if (!parentNode) return null;
+          <svg
+            className="absolute top-0 left-0 overflow-visible pointer-events-none"
+            style={{ width: 1, height: 1 }}
+          >
+            {files.map((file, index) => {
+              // Check if this file has any references rendered
+              const hasRefs = file.changedSpans?.some(
+                (s) => s.references && s.references.length > 0,
+              );
+              if (!hasRefs) return null;
 
-              // Draw curve from right side of parent to left side of child
-              const startX = parentNode.x + 500; // Width of node
-              const startY = parentNode.y + 24; // Middle of header approx
-              const endX = node.x;
-              const endY = node.y + 24;
+              const fileNode = nodes.find((n) => n.id === `file-${index}`);
+              // Find the first ref node
+              const firstRefNode = nodes.find((n) =>
+                n.id.startsWith(`ref-${index}-`),
+              );
+
+              if (!fileNode || !firstRefNode) return null;
+
+              const startX = fileNode.x + 400; // Width of file node
+              const startY = fileNode.y + 40; // Header height approx
+              const endX = firstRefNode.x;
+              const endY = firstRefNode.y + 20; // Middle of ref header
 
               const controlX1 = startX + 50;
               const controlX2 = endX - 50;
 
               return (
                 <path
-                  key={`edge-${node.id}`}
+                  key={`edge-group-${index}`}
                   d={`M ${startX} ${startY} C ${controlX1} ${startY}, ${controlX2} ${endY}, ${endX} ${endY}`}
                   fill="none"
                   stroke="#3f3f46"
@@ -567,6 +552,7 @@ export default function App() {
                 key={node.id}
                 node={node}
                 onAnalyze={analyzeFile}
+                onSize={handleNodeSize}
                 style={{
                   transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
                   willChange: "transform",

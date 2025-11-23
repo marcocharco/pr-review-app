@@ -39,6 +39,7 @@ export interface FileNodeProps {
   node: Node;
   style: React.CSSProperties;
   onAnalyze?: (filename: string) => void;
+  onSize?: (nodeId: string, height: number) => void;
 }
 
 export interface GitHubUser {
