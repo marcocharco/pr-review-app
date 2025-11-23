@@ -1,9 +1,14 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { Maximize2, Minimize2, MessageSquare, Plus } from "lucide-react";
+import { diffChars, type Change } from "diff";
 import type { FileNodeProps, Comment } from "../types";
 import { getFileIcon, getStatusColor } from "../utils/fileUtils";
 import { CommentThread } from "./CommentThread";
 import { CommentInput } from "./CommentInput";
+import {
+  guessLanguageFromPath,
+  highlightToHtmlLines,
+} from "../utils/highlight";
 
 export const FileNode = ({
   node,
@@ -57,16 +62,29 @@ export const FileNode = ({
   } | null>(null);
   const diffContentRef = useRef<HTMLDivElement>(null);
 
+  const escapeHtml = (str: string) =>
+    str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
   // Parse diff to extract line numbers and hunk information
   const parsedDiff = useMemo(() => {
     if (data.status === "related" && data.context) {
-      return { lines: data.context.split("\n"), lineNumbers: new Map() };
+      return {
+        lines: data.context.split("\n"),
+        lineNumbers: new Map<number, number>(),
+        wordDiffs: new Map<number, Change[]>(),
+      };
     }
     if (!data.patch)
-      return { lines: [], lineNumbers: new Map<number, number>() };
+      return {
+        lines: [],
+        lineNumbers: new Map<number, number>(),
+        wordDiffs: new Map<number, Change[]>(),
+      };
 
     const lines = data.patch.split("\n");
     const lineNumbers = new Map<number, number>();
+    const wordDiffs = new Map<number, Change[]>();
+
     let currentLineNumber = 0;
     let addedLines = 0;
 
@@ -91,8 +109,87 @@ export const FileNode = ({
       }
     });
 
-    return { lines, lineNumbers };
+    // Compute word-level diffs for modified blocks
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (line.startsWith("-") && !line.startsWith("---")) {
+        // Start of a deletion block
+        let delEnd = i;
+        while (
+          delEnd < lines.length &&
+          lines[delEnd].startsWith("-") &&
+          !lines[delEnd].startsWith("---")
+        ) {
+          delEnd++;
+        }
+        const delCount = delEnd - i;
+
+        // Check for following addition block
+        const addStart = delEnd;
+        let addEnd = addStart;
+        while (
+          addEnd < lines.length &&
+          lines[addEnd].startsWith("+") &&
+          !lines[addEnd].startsWith("+++")
+        ) {
+          addEnd++;
+        }
+        const addCount = addEnd - addStart;
+
+        if (delCount === addCount && delCount > 0) {
+          // Compute diffs for each pair
+          for (let k = 0; k < delCount; k++) {
+            const delLine = lines[i + k];
+            const addLine = lines[addStart + k];
+            // Skip the marker (+/-)
+            const diff = diffChars(delLine.slice(1), addLine.slice(1));
+            wordDiffs.set(i + k, diff);
+            wordDiffs.set(addStart + k, diff);
+          }
+          i = addEnd;
+          continue;
+        }
+      }
+      i++;
+    }
+
+    return { lines, lineNumbers, wordDiffs };
   }, [data.patch, data.context, data.status]);
+
+  const highlightLanguage = useMemo(
+    () => guessLanguageFromPath(data.filename),
+    [data.filename],
+  );
+
+  const diffDisplayLines = useMemo(() => {
+    if (data.status === "related") return parsedDiff.lines;
+    return parsedDiff.lines.map((line) => {
+      if (
+        line.startsWith("@@") ||
+        line.startsWith("---") ||
+        line.startsWith("+++")
+      ) {
+        return line;
+      }
+      if (line.startsWith("+") || line.startsWith("-") || line.startsWith(" ")) {
+        return line.slice(1);
+      }
+      return line;
+    });
+  }, [data.status, parsedDiff.lines]);
+
+  const highlightedLines = useMemo(() => {
+    if (data.status === "related") {
+      const codeContent = data.context ?? "";
+      return highlightToHtmlLines(codeContent, highlightLanguage);
+    }
+
+    // For diffs, highlight the code without diff markers so the language
+    // grammar can tokenize correctly.
+    const cleaned = diffDisplayLines.join("\n");
+    return highlightToHtmlLines(cleaned, highlightLanguage);
+  }, [data.status, data.context, diffDisplayLines, highlightLanguage]);
 
   // Group comments by line number
   const commentsByLine = useMemo(() => {
@@ -334,15 +431,20 @@ export const FileNode = ({
           >
             <div className="py-2">
               {parsedDiff.lines.map((line: string, i: number) => {
+                const displayLine = diffDisplayLines[i] ?? line;
                 if (data.status === "related") {
+                  const highlighted =
+                    highlightedLines[i] ?? escapeHtml(displayLine);
                   return (
                     <div
                       key={i}
                       className="px-4 py-0.5 whitespace-pre w-full border-l-2 border-transparent hover:bg-zinc-800/30"
                     >
-                      <span className="text-zinc-400 inline-block w-full">
-                        {line}
-                      </span>
+                      <span
+                        className="hljs text-zinc-400 inline-block w-full whitespace-pre break-all"
+                        style={{ background: "transparent" }}
+                        dangerouslySetInnerHTML={{ __html: highlighted }}
+                      />
                     </div>
                   );
                 }
@@ -372,6 +474,8 @@ export const FileNode = ({
                 } else if (line.startsWith("@@")) {
                   textClass = "text-blue-400";
                 }
+
+                const wordDiff = parsedDiff.wordDiffs?.get(i);
 
                 return (
                   <div key={i} className="flex flex-col group">
@@ -403,11 +507,56 @@ export const FileNode = ({
 
                       {/* Line content */}
                       <div className="flex-1 min-w-0">
-                        <span
-                          className={`${textClass} whitespace-pre break-all`}
-                        >
-                          {line}
-                        </span>
+                        {wordDiff ? (
+                          <span
+                            className={`hljs ${textClass} whitespace-pre break-all`}
+                            style={{ background: "transparent" }}
+                          >
+                            {wordDiff.map((part, idx: number) => {
+                              const partHtml =
+                                highlightToHtmlLines(
+                                  part.value,
+                                  highlightLanguage,
+                                )[0] ?? escapeHtml(part.value);
+
+                              if (line.startsWith("-")) {
+                                if (part.added) return null;
+                                const partClass = part.removed
+                                  ? "bg-rose-900/60 text-rose-200"
+                                  : "";
+                                return (
+                                  <span
+                                    key={idx}
+                                    className={partClass}
+                                    dangerouslySetInnerHTML={{ __html: partHtml }}
+                                  />
+                                );
+                              }
+
+                              // Added or unchanged line
+                              if (part.removed) return null;
+                              const partClass = part.added
+                                ? "bg-emerald-900/60 text-emerald-200"
+                                : "";
+                              return (
+                                <span
+                                  key={idx}
+                                  className={partClass}
+                                  dangerouslySetInnerHTML={{ __html: partHtml }}
+                                />
+                              );
+                            })}
+                          </span>
+                        ) : (
+                          <span
+                            className={`hljs ${textClass} whitespace-pre break-all`}
+                            style={{ background: "transparent" }}
+                            dangerouslySetInnerHTML={{
+                              __html:
+                                highlightedLines[i] ?? escapeHtml(displayLine),
+                            }}
+                          />
+                        )}
                       </div>
                     </div>
 
