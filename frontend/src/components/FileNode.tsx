@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { Maximize2, Minimize2, MessageSquare, Plus } from "lucide-react";
+import { diffChars, type Change } from "diff";
 import type { FileNodeProps, Comment } from "../types";
 import { getFileIcon, getStatusColor } from "../utils/fileUtils";
 import { CommentThread } from "./CommentThread";
@@ -60,13 +61,23 @@ export const FileNode = ({
   // Parse diff to extract line numbers and hunk information
   const parsedDiff = useMemo(() => {
     if (data.status === "related" && data.context) {
-      return { lines: data.context.split("\n"), lineNumbers: new Map() };
+      return {
+        lines: data.context.split("\n"),
+        lineNumbers: new Map<number, number>(),
+        wordDiffs: new Map<number, Change[]>(),
+      };
     }
     if (!data.patch)
-      return { lines: [], lineNumbers: new Map<number, number>() };
+      return {
+        lines: [],
+        lineNumbers: new Map<number, number>(),
+        wordDiffs: new Map<number, Change[]>(),
+      };
 
     const lines = data.patch.split("\n");
     const lineNumbers = new Map<number, number>();
+    const wordDiffs = new Map<number, Change[]>();
+
     let currentLineNumber = 0;
     let addedLines = 0;
 
@@ -91,7 +102,52 @@ export const FileNode = ({
       }
     });
 
-    return { lines, lineNumbers };
+    // Compute word-level diffs for modified blocks
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (line.startsWith("-") && !line.startsWith("---")) {
+        // Start of a deletion block
+        let delEnd = i;
+        while (
+          delEnd < lines.length &&
+          lines[delEnd].startsWith("-") &&
+          !lines[delEnd].startsWith("---")
+        ) {
+          delEnd++;
+        }
+        const delCount = delEnd - i;
+
+        // Check for following addition block
+        const addStart = delEnd;
+        let addEnd = addStart;
+        while (
+          addEnd < lines.length &&
+          lines[addEnd].startsWith("+") &&
+          !lines[addEnd].startsWith("+++")
+        ) {
+          addEnd++;
+        }
+        const addCount = addEnd - addStart;
+
+        if (delCount === addCount && delCount > 0) {
+          // Compute diffs for each pair
+          for (let k = 0; k < delCount; k++) {
+            const delLine = lines[i + k];
+            const addLine = lines[addStart + k];
+            // Skip the marker (+/-)
+            const diff = diffChars(delLine.slice(1), addLine.slice(1));
+            wordDiffs.set(i + k, diff);
+            wordDiffs.set(addStart + k, diff);
+          }
+          i = addEnd;
+          continue;
+        }
+      }
+      i++;
+    }
+
+    return { lines, lineNumbers, wordDiffs };
   }, [data.patch, data.context, data.status]);
 
   // Group comments by line number
@@ -373,6 +429,8 @@ export const FileNode = ({
                   textClass = "text-blue-400";
                 }
 
+                const wordDiff = parsedDiff.wordDiffs?.get(i);
+
                 return (
                   <div key={i} className="flex flex-col group">
                     {/* Line Row */}
@@ -403,11 +461,42 @@ export const FileNode = ({
 
                       {/* Line content */}
                       <div className="flex-1 min-w-0">
-                        <span
-                          className={`${textClass} whitespace-pre break-all`}
-                        >
-                          {line}
-                        </span>
+                        {wordDiff ? (
+                          <span
+                            className={`${textClass} whitespace-pre break-all`}
+                          >
+                            <span className="opacity-50">{line[0]}</span>
+                            {wordDiff.map((part, idx: number) => {
+                              if (line.startsWith("-")) {
+                                if (part.added) return null;
+                                const partClass = part.removed
+                                  ? "bg-rose-900/60 text-rose-200"
+                                  : "";
+                                return (
+                                  <span key={idx} className={partClass}>
+                                    {part.value}
+                                  </span>
+                                );
+                              } else {
+                                if (part.removed) return null;
+                                const partClass = part.added
+                                  ? "bg-emerald-900/60 text-emerald-200"
+                                  : "";
+                                return (
+                                  <span key={idx} className={partClass}>
+                                    {part.value}
+                                  </span>
+                                );
+                              }
+                            })}
+                          </span>
+                        ) : (
+                          <span
+                            className={`${textClass} whitespace-pre break-all`}
+                          >
+                            {line}
+                          </span>
+                        )}
                       </div>
                     </div>
 
