@@ -15,6 +15,18 @@ type ChangedSpan struct {
 	Kind  string `json:"kind"`
 	Start int    `json:"start"`
 	End   int    `json:"end"`
+	// Identifier position for LSP
+	RefLine int `json:"refLine"`
+	RefCol  int `json:"refCol"`
+
+	References []Reference `json:"references,omitempty"`
+}
+
+type Reference struct {
+	Path  string `json:"path"`
+	Line  int    `json:"line"`
+	Start int    `json:"start"`
+	End   int    `json:"end"`
 }
 
 // FileDiff captures a single file's patch and current content.

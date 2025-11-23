@@ -9,6 +9,7 @@ import (
 
 	"github.com/marcocharco/pr-review-app/cli/internal/git"
 	"github.com/marcocharco/pr-review-app/cli/internal/github"
+	"github.com/marcocharco/pr-review-app/cli/internal/lsp"
 	"github.com/marcocharco/pr-review-app/cli/internal/types"
 )
 
@@ -39,6 +40,7 @@ func BuildPRSession(ctx context.Context, prNumber int, token string) (types.Sess
 			content, err := os.ReadFile(filepath.Join(repoInfo.Root, f.Filename))
 			if err == nil {
 				spans, _ = AnalyzeFile(ctx, f.Filename, content, changedLines)
+				spans, _ = lsp.FindReferences(ctx, repoInfo.Root, spans, f.Filename)
 			}
 		}
 
