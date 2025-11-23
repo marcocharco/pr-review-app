@@ -73,14 +73,28 @@ func BuildPRSession(ctx context.Context, prNumber int, token string) (types.Sess
 		})
 	}
 
+	prStatus := "open"
+	if pr.Merged {
+		prStatus = "merged"
+	} else if pr.State == "closed" {
+		prStatus = "closed"
+	} else if pr.Draft {
+		prStatus = "draft"
+	}
+
 	return types.Session{
 		Repo: types.RepoInfo{
 			RepoName: repo,
 			Root:     repoInfo.Root,
 			Branch:   repoInfo.Branch, // This is the local branch, maybe we should use PR branch?
 			// Use the PR's head SHA instead of local HEAD
-			Head:   pr.Head.SHA,
-			Remote: repoInfo.Remote,
+			Head:     pr.Head.SHA,
+			Remote:   repoInfo.Remote,
+			RepoLink: fmt.Sprintf("https://github.com/%s/%s", owner, repo),
+			PRTitle:  pr.Title,
+			PRNumber: pr.Number,
+			PRLink:   pr.HTMLURL,
+			PRStatus: prStatus,
 		},
 		Files:    files,
 		Comments: comments,

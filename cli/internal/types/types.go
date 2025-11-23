@@ -7,6 +7,11 @@ type RepoInfo struct {
 	Head     string `json:"head"`
 	Remote   string `json:"remote"`
 	RepoName string `json:"repoName"`
+	RepoLink string `json:"repoLink"`
+	PRTitle  string `json:"prTitle"`
+	PRNumber int    `json:"prNumber"`
+	PRLink   string `json:"prLink"`
+	PRStatus string `json:"prStatus"`
 }
 
 // FileDiff captures a single file's patch and current content.

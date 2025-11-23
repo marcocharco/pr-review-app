@@ -1,4 +1,11 @@
-import { AlertCircle, GitPullRequest, Loader2 } from "lucide-react";
+import {
+  AlertCircle,
+  GitMerge,
+  GitPullRequest,
+  GitPullRequestClosed,
+  GitPullRequestDraft,
+  Loader2,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileNode } from "./components/FileNode";
 import type { FileData, Node, Comment, CommentType } from "./types";
@@ -14,6 +21,20 @@ interface CommentPayload {
   in_reply_to_id?: number;
 }
 
+// Helper to get HTTP URL from remote
+const getRepoHttpUrl = (remote: string) => {
+  if (remote.startsWith("http")) {
+    return remote.replace(/\.git$/, "");
+  }
+  if (remote.startsWith("git@")) {
+    const match = remote.match(/git@github\.com:([^/]+)\/(.+?)(\.git)?$/);
+    if (match) {
+      return `https://github.com/${match[1]}/${match[2]}`;
+    }
+  }
+  return remote;
+};
+
 export default function App() {
   // Data State
   const [nodes, setNodes] = useState<Node[]>([]);
@@ -24,6 +45,11 @@ export default function App() {
     branch: string;
     repoName: string;
     head: string;
+    prTitle?: string;
+    prNumber?: number;
+    prLink?: string;
+    prStatus?: "open" | "closed" | "merged" | "draft";
+    repoLink?: string;
   } | null>(null);
 
   // Comment State
@@ -506,6 +532,11 @@ export default function App() {
           branch: session.repo.branch,
           repoName: session.repo.repoName,
           head: session.repo.head,
+          prTitle: session.repo.prTitle,
+          prNumber: session.repo.prNumber,
+          prLink: session.repo.prLink,
+          prStatus: session.repo.prStatus,
+          repoLink: session.repo.repoLink,
         });
       }
 
@@ -541,6 +572,16 @@ export default function App() {
     fetchSession();
   }, [fetchSession]);
 
+  const repoUrl = repoInfo
+    ? repoInfo.repoLink || getRepoHttpUrl(repoInfo.remote)
+    : undefined;
+  const prUrl = repoInfo
+    ? repoInfo.prLink ||
+      (repoUrl && repoInfo.prNumber
+        ? `${repoUrl}/pull/${repoInfo.prNumber}`
+        : undefined)
+    : undefined;
+
   return (
     <div className="w-screen h-screen bg-[#09090b] flex flex-col overflow-hidden font-sans text-zinc-300 selection:bg-blue-500/30">
       {/* Header */}
@@ -555,13 +596,59 @@ export default function App() {
 
         <div className="flex items-center gap-4">
           {repoInfo && (
-            <a
-              href={repoInfo.remote}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="transition-colors group"
-            >
-              <div className="flex items-center gap-2 text-sm text-zinc-400 group-hover:text-blue-400">
+            <div className="flex items-center gap-4 text-sm text-zinc-400">
+              {repoInfo.prTitle && (
+                <>
+                  {repoInfo.prStatus && (
+                    // Badge
+                    <div
+                      className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[11px] font-medium capitalize mr-1 ${
+                        repoInfo.prStatus === "merged"
+                          ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
+                          : repoInfo.prStatus === "closed"
+                          ? "bg-red-500/10 text-red-400 border-red-500/20"
+                          : repoInfo.prStatus === "draft"
+                          ? "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
+                          : "bg-green-500/10 text-green-400 border-green-500/20"
+                      }`}
+                    >
+                      {repoInfo.prStatus === "merged" ? (
+                        <GitMerge size={12} />
+                      ) : repoInfo.prStatus === "closed" ? (
+                        <GitPullRequestClosed size={12} />
+                      ) : repoInfo.prStatus === "draft" ? (
+                        <GitPullRequestDraft size={12} />
+                      ) : (
+                        <GitPullRequest size={12} />
+                      )}
+                      <span>{repoInfo.prStatus}</span>
+                    </div>
+                  )}
+                  <a
+                    href={prUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="transition-colors group flex items-center gap-2 hover:text-blue-400"
+                  >
+                    {/* PR Info */}
+                    <span className="text-zinc-200 font-medium group-hover:text-blue-400">
+                      {repoInfo.prTitle}
+                    </span>
+                    <span className="text-zinc-500 group-hover:text-blue-400">
+                      #{repoInfo.prNumber}
+                    </span>
+                  </a>
+                  {/* Spacer */}
+                  <div className="w-px h-4 bg-zinc-700" />
+                </>
+              )}
+              <a
+                href={repoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition-colors group flex items-center gap-2"
+              >
+                {/* Repo Info */}
                 <span className="text-zinc-200 font-medium group-hover:text-blue-400">
                   {repoInfo.repoName}
                 </span>
@@ -569,8 +656,8 @@ export default function App() {
                 <span className="text-zinc-200 group-hover:text-blue-400">
                   {repoInfo.branch}
                 </span>
-              </div>
-            </a>
+              </a>
+            </div>
           )}
 
           <button

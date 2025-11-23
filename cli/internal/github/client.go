@@ -58,8 +58,13 @@ type CommentRequest struct {
 }
 
 type PullRequest struct {
-	Number int    `json:"number"`
-	Head   Commit `json:"head"`
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	HTMLURL string `json:"html_url"`
+	State   string `json:"state"`
+	Draft   bool   `json:"draft"`
+	Merged  bool   `json:"merged"`
+	Head    Commit `json:"head"`
 }
 
 type Commit struct {
