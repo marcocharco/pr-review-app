@@ -28,10 +28,11 @@ type ChangedSpan struct {
 }
 
 type Reference struct {
-	Path  string `json:"path"`
-	Line  int    `json:"line"`
-	Start int    `json:"start"`
-	End   int    `json:"end"`
+	Path    string `json:"path"`
+	Line    int    `json:"line"`
+	Start   int    `json:"start"`
+	End     int    `json:"end"`
+	Context string `json:"context"`
 }
 
 // FileDiff captures a single file's patch and current content.

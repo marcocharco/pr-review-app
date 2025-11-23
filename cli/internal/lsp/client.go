@@ -284,6 +284,13 @@ func FindReferences(ctx context.Context, root string, spans []types.ChangedSpan,
 	// Open the file (optional if on disk, but good practice)
 	content, err := os.ReadFile(filepath.Join(root, filePath))
 	if err == nil {
+		// Ensure file is closed before opening (in case it was left open)
+		_ = client.Notify("textDocument/didClose", struct {
+			TextDocument TextDocumentIdentifier `json:"textDocument"`
+		}{
+			TextDocument: TextDocumentIdentifier{URI: URIFromFile(filepath.Join(root, filePath))},
+		})
+
 		client.Notify("textDocument/didOpen", struct {
 			TextDocument struct {
 				URI        string `json:"uri"`
@@ -311,6 +318,8 @@ func FindReferences(ctx context.Context, root string, spans []types.ChangedSpan,
 		if span.RefLine == 0 && span.RefCol == 0 {
 			continue
 		}
+
+		fmt.Printf("Finding references for %s:%d:%d\n", filePath, span.RefLine, span.RefCol)
 
 		params := ReferenceParams{
 			TextDocument: TextDocumentIdentifier{URI: URIFromFile(filepath.Join(root, filePath))},
