@@ -6,6 +6,7 @@ import { getFileIcon, getStatusColor } from "../utils/fileUtils";
 export const FileNode = ({
   node,
   style,
+  zoom,
   onAnalyze,
   onSize,
 }: FileNodeProps) => {
@@ -13,6 +14,14 @@ export const FileNode = ({
   // Start minimized if related, otherwise expanded
   const [expanded, setExpanded] = useState(data.status !== "related");
   const rootRef = useRef<HTMLDivElement>(null);
+
+  const hasAnyReferences = useMemo(
+    () =>
+      data.changedSpans?.some(
+        (span) => span.references && span.references.length > 0,
+      ) ?? false,
+    [data.changedSpans],
+  );
 
   const diffLines = useMemo(() => {
     if (data.status === "related" && data.context) {
@@ -28,11 +37,14 @@ export const FileNode = ({
     if (!el || !onSize) return;
 
     const updateSize = () => {
-      const height = Math.round(el.getBoundingClientRect().height);
+      const height = Math.round(el.getBoundingClientRect().height / zoom);
       onSize(node.id, height);
     };
 
     updateSize();
+
+    // Force update after a frame to ensure layout is settled, especially after expansion
+    requestAnimationFrame(updateSize);
 
     const observer = new ResizeObserver(() => updateSize());
     observer.observe(el);
@@ -40,13 +52,16 @@ export const FileNode = ({
     return () => {
       observer.disconnect();
     };
-  }, [node.id, onSize]);
+  }, [node.id, onSize, expanded, zoom]);
 
   return (
     <div
       ref={rootRef}
-      style={style}
-      className={`absolute rounded-md border border-[#27272a] bg-[#18181b] w-[500px] shadow-2xl shadow-black/50 flex flex-col transition-all duration-200 ${
+      style={{
+        ...style,
+        maxHeight: expanded ? 960 : 64,
+      }}
+      className={`absolute rounded-md border border-[#27272a] bg-[#18181b] w-[500px] shadow-2xl shadow-black/50 flex flex-col transition-[max-height,transform,box-shadow,background-color,border-color] duration-200 ease-out ${
         expanded ? "h-auto" : "h-12 overflow-hidden"
       } ${data.status === "removed" ? "opacity-60" : ""} ${
         data.status === "related" ? "border-zinc-700 border-dashed" : ""
@@ -96,19 +111,31 @@ export const FileNode = ({
       </div>
 
       {/* Analyze Button for main files */}
-      {expanded && data.status !== "related" && onAnalyze && !data.changedSpans && (
-        <div className="px-4 py-2 border-b border-[#27272a] bg-[#18181b]">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onAnalyze(data.filename);
-            }}
-            className="text-[10px] bg-blue-900/30 text-blue-400 hover:bg-blue-900/50 px-2 py-1 rounded border border-blue-900/50 transition-colors w-full"
-          >
-            Find References
-          </button>
-        </div>
-      )}
+      {expanded &&
+        data.status !== "related" &&
+        onAnalyze &&
+        !data.referencesChecked && (
+          <div className="px-4 py-2 border-b border-[#27272a] bg-[#18181b]">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onAnalyze(data.filename);
+              }}
+              className="text-[10px] bg-blue-900/30 text-blue-400 hover:bg-blue-900/50 px-2 py-1 rounded border border-blue-900/50 transition-colors w-full"
+            >
+              Find References
+            </button>
+          </div>
+        )}
+
+      {expanded &&
+        data.status !== "related" &&
+        data.referencesChecked &&
+        !hasAnyReferences && (
+          <div className="px-4 py-2 border-b border-[#27272a] bg-[#18181b] text-[11px] text-zinc-400">
+            No references found for this file.
+          </div>
+        )}
 
       {expanded && (
         <>

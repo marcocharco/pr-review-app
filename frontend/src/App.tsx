@@ -11,11 +11,14 @@ export default function App() {
   // Layout Logic
   const nodes = useMemo(() => {
     const COLUMNS = 2;
-    const X_SPACING = 1050;
-    const REF_OFFSET_X = 450;
-    const DEFAULT_FILE_HEIGHT = 420;
-    const DEFAULT_REF_HEIGHT = 56; // collapsed related card height
-    const GAP_Y = 120;
+    const X_SPACING = 1450;
+    const REF_OFFSET_X = 760;
+    const DEFAULT_FILE_HEIGHT = 600;
+    const MIN_FILE_HEIGHT = 360;
+    const DEFAULT_REF_HEIGHT = 88; // generous default to avoid initial overlap
+    const MIN_REF_HEIGHT = 72;
+    const STACK_GAP = 32;
+    const GAP_Y = 260;
 
     const columnY = new Array(COLUMNS).fill(0);
     const newNodes: Node[] = [];
@@ -27,7 +30,11 @@ export default function App() {
 
       // Main file node
       const fileNodeId = `file-${index}`;
-      const fileHeight = nodeHeights[fileNodeId] ?? DEFAULT_FILE_HEIGHT;
+      const measuredFileHeight = nodeHeights[fileNodeId];
+      const fileHeight = Math.max(
+        measuredFileHeight ?? DEFAULT_FILE_HEIGHT,
+        MIN_FILE_HEIGHT,
+      );
       newNodes.push({
         id: fileNodeId,
         x,
@@ -44,7 +51,11 @@ export default function App() {
           if (span.references && span.references.length > 0) {
             span.references.forEach((ref, refIndex) => {
               const refNodeId = `ref-${index}-${spanIndex}-${refIndex}`;
-              const refHeight = nodeHeights[refNodeId] ?? DEFAULT_REF_HEIGHT;
+              const measuredRefHeight = nodeHeights[refNodeId];
+              const refHeight = Math.max(
+                measuredRefHeight ?? DEFAULT_REF_HEIGHT,
+                MIN_REF_HEIGHT,
+              );
               const refY = startY + refYOffset;
 
               newNodes.push({
@@ -59,7 +70,7 @@ export default function App() {
                 },
               });
 
-              refYOffset += refHeight; // stack tightly; expansion pushes next refs down
+              refYOffset += refHeight + STACK_GAP; // stack with breathing room; expansion pushes next refs down
               maxRefY = Math.max(maxRefY, refY + refHeight);
             });
           }
@@ -333,12 +344,27 @@ export default function App() {
         filename: f.path,
         status: f.status,
         patch: f.patch,
-        changedSpans: f.changedSpans,
+        changedSpans: f.changedSpans ?? [],
+        referencesChecked: true,
       }));
 
       // Merge updated files into existing files
       setFiles((prevFiles) => {
         const nextFiles = [...prevFiles];
+
+        // If a specific file was analyzed, mark it as checked immediately.
+        // This ensures that even if the backend returns no references (and thus no updates for this file),
+        // the UI will update to show "No references found".
+        if (filename) {
+          const idx = nextFiles.findIndex((f) => f.filename === filename);
+          if (idx !== -1) {
+            nextFiles[idx] = {
+              ...nextFiles[idx],
+              referencesChecked: true,
+            };
+          }
+        }
+
         updatedFiles.forEach((update) => {
           const idx = nextFiles.findIndex(
             (f) => f.filename === update.filename,
@@ -347,7 +373,8 @@ export default function App() {
             nextFiles[idx] = {
               ...nextFiles[idx],
               patch: update.patch,
-              changedSpans: update.changedSpans,
+              changedSpans: update.changedSpans ?? [],
+              referencesChecked: true,
             };
           }
         });
@@ -400,6 +427,7 @@ export default function App() {
           status: f.status,
           patch: f.patch,
           changedSpans: f.changedSpans,
+          referencesChecked: false,
         }),
       );
 
@@ -509,39 +537,37 @@ export default function App() {
             className="absolute top-0 left-0 overflow-visible pointer-events-none"
             style={{ width: 1, height: 1 }}
           >
-            {files.map((file, index) => {
-              // Check if this file has any references rendered
-              const hasRefs = file.changedSpans?.some(
-                (s) => s.references && s.references.length > 0,
-              );
-              if (!hasRefs) return null;
-
+            {files.map((_, index) => {
               const fileNode = nodes.find((n) => n.id === `file-${index}`);
-              // Find the first ref node
-              const firstRefNode = nodes.find((n) =>
+              const refNodes = nodes.filter((n) =>
                 n.id.startsWith(`ref-${index}-`),
               );
 
-              if (!fileNode || !firstRefNode) return null;
+              if (!fileNode || refNodes.length === 0) return null;
 
-              const startX = fileNode.x + 400; // Width of file node
-              const startY = fileNode.y + 40; // Header height approx
-              const endX = firstRefNode.x;
-              const endY = firstRefNode.y + 20; // Middle of ref header
+              const startX = fileNode.x + 500; // Exact right edge of the card
+              const startYBase = fileNode.y + 24; // near header center
 
-              const controlX1 = startX + 50;
-              const controlX2 = endX - 50;
+              return refNodes.map((refNode, refIdx) => {
+                const endX = refNode.x; // left edge of reference card
+                const endY = refNode.y + 22; // center of related header
 
-              return (
-                <path
-                  key={`edge-group-${index}`}
-                  d={`M ${startX} ${startY} C ${controlX1} ${startY}, ${controlX2} ${endY}, ${endX} ${endY}`}
-                  fill="none"
-                  stroke="#3f3f46"
-                  strokeWidth="2"
-                  strokeDasharray="4"
-                />
-              );
+                const controlX1 = startX + 110;
+                const controlX2 = endX - 90;
+                const startY = startYBase + refIdx * 8; // tiny stagger to avoid overlap
+
+                return (
+                  <path
+                    key={`edge-${refNode.id}`}
+                    d={`M ${startX} ${startY} C ${controlX1} ${startY}, ${controlX2} ${endY}, ${endX} ${endY}`}
+                    fill="none"
+                    stroke="#3f3f46"
+                    strokeWidth="2"
+                    strokeDasharray="4"
+                    strokeLinecap="round"
+                  />
+                );
+              });
             })}
           </svg>
 
@@ -552,6 +578,7 @@ export default function App() {
                 key={node.id}
                 node={node}
                 onAnalyze={analyzeFile}
+                zoom={zoom}
                 onSize={handleNodeSize}
                 style={{
                   transform: `translate3d(${node.x}px, ${node.y}px, 0)`,

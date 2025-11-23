@@ -23,6 +23,7 @@ export interface FileData {
   status: FileStatus;
   patch?: string;
   changedSpans?: ChangedSpan[];
+  referencesChecked?: boolean;
   // For related files
   context?: string;
   referenceLine?: number;
@@ -38,6 +39,7 @@ export interface Node {
 export interface FileNodeProps {
   node: Node;
   style: React.CSSProperties;
+  zoom: number;
   onAnalyze?: (filename: string) => void;
   onSize?: (nodeId: string, height: number) => void;
 }
