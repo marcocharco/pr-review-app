@@ -24,3 +24,21 @@ export interface GitHubUser {
   avatar_url: string;
   html_url: string;
 }
+
+export type CommentType = "line" | "selection" | "file";
+
+export interface Comment {
+  id: number;
+  fileId: string;
+  type: CommentType;
+  lineNumber?: number;
+  startLine?: number;
+  endLine?: number;
+  side: "LEFT" | "RIGHT";
+  body: string;
+  author: GitHubUser;
+  createdAt: string;
+  updatedAt: string;
+  replies: Comment[];
+  resolved?: boolean;
+}

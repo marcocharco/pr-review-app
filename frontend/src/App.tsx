@@ -1,7 +1,7 @@
 import { AlertCircle, GitPullRequest, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileNode } from "./components/FileNode";
-import type { FileData, Node } from "./types";
+import type { FileData, Node, Comment } from "./types";
 
 export default function App() {
   // Data State
@@ -13,6 +13,9 @@ export default function App() {
     branch: string;
     repoName: string;
   } | null>(null);
+
+  // Local Comment State (Mocking backend for now)
+  const [comments, setComments] = useState<Comment[]>([]);
 
   // Canvas State
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -34,6 +37,83 @@ export default function App() {
   useEffect(() => {
     zoomRef.current = zoom;
   }, [zoom]);
+
+  // --- Comment Handlers (Mocked) ---
+
+  const handleAddComment = async (
+    filePath: string,
+    body: string,
+    lineNumber?: number,
+    startLine?: number
+  ) => {
+    const newComment: Comment = {
+      id: Date.now(),
+      fileId: filePath, // Using filename as fileId for simplicity in this mock
+      type:
+        lineNumber !== undefined
+          ? startLine !== undefined
+            ? "selection"
+            : "line"
+          : "file",
+      lineNumber,
+      startLine,
+      side: "RIGHT",
+      body,
+      author: {
+        login: "user", // Mock user
+        name: "Current User",
+        avatar_url: "https://github.com/ghost.png",
+        html_url: "",
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      replies: [],
+    };
+
+    setComments((prev) => [...prev, newComment]);
+  };
+
+  const handleEditComment = async (commentId: number, body: string) => {
+    setComments((prev) =>
+      prev.map((c) =>
+        c.id === commentId
+          ? { ...c, body, updatedAt: new Date().toISOString() }
+          : c
+      )
+    );
+  };
+
+  const handleDeleteComment = async (commentId: number) => {
+    setComments((prev) => prev.filter((c) => c.id !== commentId));
+  };
+
+  const handleReplyComment = async (inReplyToId: number, body: string) => {
+    const reply: Comment = {
+      id: Date.now(),
+      fileId: "", // Nested replies don't strictly need this in the UI if parent has it
+      type: "line", // inherit
+      side: "RIGHT",
+      body,
+      author: {
+        login: "user",
+        name: "Current User",
+        avatar_url: "https://github.com/ghost.png",
+        html_url: "",
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      replies: [],
+    };
+
+    setComments((prev) =>
+      prev.map((c) => {
+        if (c.id === inReplyToId) {
+          return { ...c, replies: [...c.replies, reply] };
+        }
+        return c;
+      })
+    );
+  };
 
   // --- Canvas Logic ---
 
@@ -115,7 +195,7 @@ export default function App() {
     // Check if the event is over a scrollable element
     const targetElement = event.target as HTMLElement;
     const scrollableElement = targetElement.closest?.(
-      ".overflow-y-auto",
+      ".overflow-y-auto"
     ) as HTMLElement;
 
     // Determine gesture type on first event or if gesture state is reset
@@ -208,7 +288,7 @@ export default function App() {
       // Calculate new zoom
       const newZoom = Math.max(
         0.1,
-        Math.min(3, currentZoom - event.deltaY * ZOOM_SPEED),
+        Math.min(3, currentZoom - event.deltaY * ZOOM_SPEED)
       );
 
       // Calculate new pan to keep the point under cursor fixed
@@ -289,7 +369,7 @@ export default function App() {
 
       if (!response.ok) {
         throw new Error(
-          `Failed to fetch session: ${response.status} ${response.statusText}`,
+          `Failed to fetch session: ${response.status} ${response.statusText}`
         );
       }
 
@@ -309,14 +389,14 @@ export default function App() {
           filename: f.path,
           status: f.status,
           patch: f.patch,
-        }),
+        })
       );
 
       processFilesToLayout(files);
     } catch (err) {
       console.error(err);
       setError(
-        err instanceof Error ? err.message : "An unknown error occurred",
+        err instanceof Error ? err.message : "An unknown error occurred"
       );
     } finally {
       setIsLoading(false);
@@ -415,6 +495,14 @@ export default function App() {
                   transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
                   willChange: "transform",
                 }}
+                comments={comments.filter(
+                  (c) => c.fileId === node.data.filename
+                )}
+                onAddComment={handleAddComment}
+                onEditComment={handleEditComment}
+                onDeleteComment={handleDeleteComment}
+                onReplyComment={handleReplyComment}
+                currentUser="user"
               />
             ))}
           </div>
