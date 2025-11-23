@@ -343,7 +343,14 @@ export default function App() {
           {repoInfo && (
             <div className="flex items-center gap-2 text-sm text-zinc-400">
               <span className="text-zinc-200 font-medium">
-                {repoInfo.repoName}
+                <a
+                  href={repoInfo.remote}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-blue-400 transition-colors"
+                >
+                  {repoInfo.repoName}
+                </a>
               </span>
               <span className="text-zinc-600">/</span>
               <span className="text-zinc-200">{repoInfo.branch}</span>
