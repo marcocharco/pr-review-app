@@ -40,7 +40,6 @@ func ParsePatch(patch string) ([]int, error) {
 			currentLine++
 		} else if strings.HasPrefix(line, "-") {
 			// Deleted lines don't exist in the new file, so we skip incrementing currentLine
-			// But wait, we are mapping to the NEW file.
 			// In unified diff:
 			// " " -> present in both, increment both counters (we only track new)
 			// "+" -> present in new, increment new counter
