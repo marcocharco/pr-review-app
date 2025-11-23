@@ -30,3 +30,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Embedded frontend (build artifact, copied from ../frontend/dist)
+embed/

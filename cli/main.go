@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/signal"
@@ -18,7 +20,20 @@ import (
 	"github.com/marcocharco/pr-review-app/cli/internal/types"
 )
 
+//go:embed embed/frontend/dist
+var frontendFS embed.FS
+
 var osInterruptSignals = []os.Signal{syscall.SIGINT, syscall.SIGTERM}
+
+// getFrontendFS returns the embedded frontend filesystem, stripping the "embed/frontend/dist" prefix
+func getFrontendFS() (fs.FS, error) {
+	// The embed includes "embed/frontend/dist", so we need to strip that prefix
+	distFS, err := fs.Sub(frontendFS, "embed/frontend/dist")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get frontend filesystem: %w", err)
+	}
+	return distFS, nil
+}
 
 func main() {
 	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -71,21 +86,15 @@ func main() {
 	}
 	fmt.Printf("Loaded %d files from PR.\n", len(session.Files))
 
-	// Look for frontend/dist relative to the current working directory
-	// Assuming we are running from the root or cli/ folder
-	webDir := "../frontend/dist"
-	if _, err := os.Stat(webDir); os.IsNotExist(err) {
-		// Try current directory (if running from root and dist is moved?)
-		// Or maybe we are in root and frontend/dist is there
-		if _, err := os.Stat("frontend/dist"); err == nil {
-			webDir = "frontend/dist"
-		} else {
-			log.Printf("warning: frontend build not found at %s. Please run 'npm run build' in frontend/", webDir)
-			webDir = ""
-		}
+	// Get embedded frontend filesystem
+	frontendFS, err := getFrontendFS()
+	if err != nil {
+		log.Printf("warning: failed to load embedded frontend: %v", err)
+		log.Printf("  The tool will work but the web UI won't be available.")
+		frontendFS = nil
 	}
 
-	srv, err := server.Start(ctx, generator, webDir)
+	srv, err := server.Start(ctx, generator, frontendFS)
 	if err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}

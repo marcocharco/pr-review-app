@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -19,8 +20,8 @@ type Server struct {
 
 type SessionGenerator func(context.Context) (types.Session, error)
 
-// Start serves the given session at /session and the static web assets from webDir at /.
-func Start(ctx context.Context, generator SessionGenerator, webDir string) (*Server, error) {
+// Start serves the given session at /session and the static web assets from frontendFS at /.
+func Start(ctx context.Context, generator SessionGenerator, frontendFS fs.FS) (*Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/session", func(w http.ResponseWriter, r *http.Request) {
 		session, err := generator(r.Context())
@@ -32,10 +33,10 @@ func Start(ctx context.Context, generator SessionGenerator, webDir string) (*Ser
 		_ = json.NewEncoder(w).Encode(session)
 	})
 
-	if webDir != "" {
-		// Serve static files from the frontend build directory
-		fs := http.FileServer(http.Dir(webDir))
-		mux.Handle("/", fs)
+	if frontendFS != nil {
+		// Serve static files from the embedded frontend filesystem
+		fileServer := http.FileServer(http.FS(frontendFS))
+		mux.Handle("/", fileServer)
 	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
