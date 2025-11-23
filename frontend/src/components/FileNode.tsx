@@ -4,6 +4,10 @@ import type { FileNodeProps, Comment } from "../types";
 import { getFileIcon, getStatusColor } from "../utils/fileUtils";
 import { CommentThread } from "./CommentThread";
 import { CommentInput } from "./CommentInput";
+import {
+  guessLanguageFromPath,
+  highlightToHtmlLines,
+} from "../utils/highlight";
 
 export const FileNode = ({
   node,
@@ -57,6 +61,9 @@ export const FileNode = ({
   } | null>(null);
   const diffContentRef = useRef<HTMLDivElement>(null);
 
+  const escapeHtml = (str: string) =>
+    str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
   // Parse diff to extract line numbers and hunk information
   const parsedDiff = useMemo(() => {
     if (data.status === "related" && data.context) {
@@ -93,6 +100,40 @@ export const FileNode = ({
 
     return { lines, lineNumbers };
   }, [data.patch, data.context, data.status]);
+
+  const highlightLanguage = useMemo(
+    () => guessLanguageFromPath(data.filename),
+    [data.filename],
+  );
+
+  const diffDisplayLines = useMemo(() => {
+    if (data.status === "related") return parsedDiff.lines;
+    return parsedDiff.lines.map((line) => {
+      if (
+        line.startsWith("@@") ||
+        line.startsWith("---") ||
+        line.startsWith("+++")
+      ) {
+        return line;
+      }
+      if (line.startsWith("+") || line.startsWith("-") || line.startsWith(" ")) {
+        return line.slice(1);
+      }
+      return line;
+    });
+  }, [data.status, parsedDiff.lines]);
+
+  const highlightedLines = useMemo(() => {
+    if (data.status === "related") {
+      const codeContent = data.context ?? "";
+      return highlightToHtmlLines(codeContent, highlightLanguage);
+    }
+
+    // For diffs, highlight the code without diff markers so the language
+    // grammar can tokenize correctly.
+    const cleaned = diffDisplayLines.join("\n");
+    return highlightToHtmlLines(cleaned, highlightLanguage);
+  }, [data.status, data.context, diffDisplayLines, highlightLanguage]);
 
   // Group comments by line number
   const commentsByLine = useMemo(() => {
@@ -334,15 +375,20 @@ export const FileNode = ({
           >
             <div className="py-2">
               {parsedDiff.lines.map((line: string, i: number) => {
+                const displayLine = diffDisplayLines[i] ?? line;
                 if (data.status === "related") {
+                  const highlighted =
+                    highlightedLines[i] ?? escapeHtml(displayLine);
                   return (
                     <div
                       key={i}
                       className="px-4 py-0.5 whitespace-pre w-full border-l-2 border-transparent hover:bg-zinc-800/30"
                     >
-                      <span className="text-zinc-400 inline-block w-full">
-                        {line}
-                      </span>
+                      <span
+                        className="hljs text-zinc-400 inline-block w-full whitespace-pre break-all"
+                        style={{ background: "transparent" }}
+                        dangerouslySetInnerHTML={{ __html: highlighted }}
+                      />
                     </div>
                   );
                 }
@@ -404,10 +450,13 @@ export const FileNode = ({
                       {/* Line content */}
                       <div className="flex-1 min-w-0">
                         <span
-                          className={`${textClass} whitespace-pre break-all`}
-                        >
-                          {line}
-                        </span>
+                          className={`hljs ${textClass} whitespace-pre break-all`}
+                          style={{ background: "transparent" }}
+                          dangerouslySetInnerHTML={{
+                            __html:
+                              highlightedLines[i] ?? escapeHtml(displayLine),
+                          }}
+                        />
                       </div>
                     </div>
 
