@@ -262,14 +262,35 @@ export default function App() {
         id: `file-${index}`,
         x,
         y,
-        data: {
-          filename: file.filename,
-          status: file.status,
-          patch: file.patch,
-        },
+        data: file,
       };
 
       newNodes.push(node);
+
+      // Process references
+      if (file.changedSpans) {
+        file.changedSpans.forEach((span, spanIndex) => {
+          if (span.references) {
+            span.references.forEach((ref, refIndex) => {
+              // Create a node for the reference
+              // Position it to the right of the source file
+              // Stagger them vertically if multiple
+              const refNode: Node = {
+                id: `ref-${index}-${spanIndex}-${refIndex}`,
+                x: x + X_SPACING * 0.8, // Offset to the right
+                y: y + (refIndex + 1) * 100, // Offset down
+                data: {
+                  filename: ref.path,
+                  status: "related",
+                  context: ref.context,
+                  referenceLine: ref.line,
+                },
+              };
+              newNodes.push(refNode);
+            });
+          }
+        });
+      }
     });
 
     setNodes(newNodes);
@@ -277,15 +298,100 @@ export default function App() {
 
   // --- Session Fetch ---
 
-  const fetchSession = useCallback(async () => {
+  const analyzeFile = async (filename?: string) => {
+    try {
+      const response = await fetch("/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename }),
+      });
+
+      if (!response.ok) return;
+
+      const rawFiles = await response.json();
+      const updatedFiles: FileData[] = rawFiles.map((f: any) => ({
+        filename: f.path,
+        status: f.status,
+        patch: f.patch,
+        changedSpans: f.changedSpans,
+      }));
+
+      // Merge updated files into existing nodes
+      setNodes((prevNodes) => {
+        const nextNodes = [...prevNodes];
+        const X_SPACING = 600;
+
+        updatedFiles.forEach((file) => {
+          // Find existing file node
+          const fileNodeIndex = nextNodes.findIndex(
+            (n) => n.data.filename === file.filename && n.data.status !== "related",
+          );
+
+          if (fileNodeIndex === -1) return;
+
+          // Update file data
+          nextNodes[fileNodeIndex] = {
+            ...nextNodes[fileNodeIndex],
+            data: {
+              ...nextNodes[fileNodeIndex].data,
+              changedSpans: file.changedSpans,
+            },
+          };
+
+          const fileNode = nextNodes[fileNodeIndex];
+          const x = fileNode.x;
+          const y = fileNode.y;
+          
+          // Extract the numeric index from the file node ID (e.g. "file-0" -> "0")
+          const fileIdParts = fileNode.id.split("-");
+          const fileIndexId = fileIdParts[1];
+
+          // Add reference nodes
+          if (file.changedSpans) {
+            file.changedSpans.forEach((span, spanIndex) => {
+              if (span.references) {
+                span.references.forEach((ref, refIndex) => {
+                  // Check if ref node already exists
+                  const refId = `ref-${fileIndexId}-${spanIndex}-${refIndex}`;
+                  if (nextNodes.some((n) => n.id === refId)) return;
+
+                  const refNode: Node = {
+                    id: refId,
+                    x: x + X_SPACING * 0.8,
+                    y: y + (refIndex + 1) * 100, // Initial stack
+                    data: {
+                      filename: ref.path,
+                      status: "related",
+                      context: ref.context,
+                      referenceLine: ref.line,
+                    },
+                  };
+                  nextNodes.push(refNode);
+                });
+              }
+            });
+          }
+        });
+        return nextNodes;
+      });
+    } catch (err) {
+      console.error("Analysis failed:", err);
+    }
+  };
+
+  const fetchSession = useCallback(async (refresh = false) => {
     setIsLoading(true);
     setError(null);
-    setNodes([]);
-    setPan({ x: 100, y: 100 });
-    setZoom(1);
+    if (!refresh) {
+      setNodes([]);
+      setPan({ x: 100, y: 100 });
+      setZoom(1);
+    }
 
     try {
-      const response = await fetch("/session");
+      const endpoint = refresh ? "/refresh" : "/session";
+      const method = refresh ? "POST" : "GET";
+      const response = await fetch(endpoint, { method });
 
       if (!response.ok) {
         throw new Error(
@@ -305,10 +411,16 @@ export default function App() {
 
       // Map session files to FileData
       const files: FileData[] = session.files.map(
-        (f: { path: string; status: any; patch: string }) => ({
+        (f: {
+          path: string;
+          status: any;
+          patch: string;
+          changedSpans?: any[];
+        }) => ({
           filename: f.path,
           status: f.status,
           patch: f.patch,
+          changedSpans: f.changedSpans,
         }),
       );
 
@@ -360,7 +472,14 @@ export default function App() {
           <div className="h-6 w-px bg-[#27272a] mx-1" />
 
           <button
-            onClick={fetchSession}
+            onClick={() => analyzeFile()}
+            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-4 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-all border border-zinc-700"
+          >
+            <span>Analyze All</span>
+          </button>
+
+          <button
+            onClick={() => fetchSession(true)}
             disabled={isLoading}
             className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-xs font-medium flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -405,12 +524,49 @@ export default function App() {
           }}
           className="absolute top-0 left-0 w-0 h-0 pointer-events-none"
         >
+          {/* Edges Layer */}
+          <svg className="absolute top-0 left-0 overflow-visible pointer-events-none" style={{ width: 1, height: 1 }}>
+            {nodes.map((node) => {
+              if (node.data.status !== "related") return null;
+              // Find parent node
+              // ID format: ref-{fileIndex}-{spanIndex}-{refIndex}
+              const parts = node.id.split("-");
+              if (parts.length !== 4) return null;
+              const fileIndex = parts[1];
+              const parentId = `file-${fileIndex}`;
+              const parentNode = nodes.find((n) => n.id === parentId);
+              
+              if (!parentNode) return null;
+
+              // Draw curve from right side of parent to left side of child
+              const startX = parentNode.x + 500; // Width of node
+              const startY = parentNode.y + 24; // Middle of header approx
+              const endX = node.x;
+              const endY = node.y + 24;
+
+              const controlX1 = startX + 50;
+              const controlX2 = endX - 50;
+
+              return (
+                <path
+                  key={`edge-${node.id}`}
+                  d={`M ${startX} ${startY} C ${controlX1} ${startY}, ${controlX2} ${endY}, ${endX} ${endY}`}
+                  fill="none"
+                  stroke="#3f3f46"
+                  strokeWidth="2"
+                  strokeDasharray="4"
+                />
+              );
+            })}
+          </svg>
+
           {/* Nodes Layer */}
           <div className="pointer-events-auto">
             {nodes.map((node) => (
               <FileNode
                 key={node.id}
                 node={node}
+                onAnalyze={analyzeFile}
                 style={{
                   transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
                   willChange: "transform",

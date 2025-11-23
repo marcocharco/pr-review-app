@@ -9,7 +9,13 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 
+	"sync"
+
+	"github.com/marcocharco/pr-review-app/cli/internal/collect"
+	"github.com/marcocharco/pr-review-app/cli/internal/lsp"
 	"github.com/marcocharco/pr-review-app/cli/internal/types"
 )
 
@@ -23,29 +29,127 @@ type SessionGenerator func(context.Context) (types.Session, error)
 // Start serves the given session at /session and the static web assets from frontendFS at /.
 // If devMode is true, uses a fixed port (8080) for easier Vite proxying.
 func Start(ctx context.Context, generator SessionGenerator, frontendFS fs.FS, devMode bool) (*Server, error) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/session", func(w http.ResponseWriter, r *http.Request) {
-		// Add CORS headers for dev mode
-		if devMode {
-			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	var session types.Session
+	var sessionMu sync.RWMutex
 
-			// Handle preflight requests
-			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusOK)
-				return
+	// Generate session once and store it
+	s, err := generator(ctx)
+	if err != nil {
+		return nil, err
+	}
+	session = s
+
+	mux := http.NewServeMux()
+
+	// CORS middleware helper
+	withCORS := func(h http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if devMode {
+				w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+				if r.Method == "OPTIONS" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+			}
+			h(w, r)
+		}
+	}
+
+	mux.HandleFunc("/session", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		sessionMu.RLock()
+		defer sessionMu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(session)
+	}))
+
+	mux.HandleFunc("/refresh", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		newSession, err := generator(r.Context())
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to refresh session: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		sessionMu.Lock()
+		session = newSession
+		sessionMu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(session)
+	}))
+
+	mux.HandleFunc("/analyze", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			Filename string `json:"filename"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		sessionMu.RLock()
+		currentSession := session
+		sessionMu.RUnlock()
+
+		// Find the file in the session
+		var targetFiles []types.FileDiff
+		if req.Filename == "" {
+			targetFiles = currentSession.Files
+		} else {
+			for _, f := range currentSession.Files {
+				if f.Path == req.Filename {
+					targetFiles = append(targetFiles, f)
+					break
+				}
 			}
 		}
 
-		session, err := generator(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+		var results []types.FileDiff
+		for _, f := range targetFiles {
+			// Parse patch
+			changedLines, err := collect.ParsePatch(f.Patch)
+			if err != nil || len(changedLines) == 0 {
+				continue
+			}
+
+			// Read content
+			content, err := os.ReadFile(filepath.Join(currentSession.Repo.Root, f.Path))
+			if err != nil {
+				continue
+			}
+
+			// Analyze
+			spans, err := collect.AnalyzeFile(r.Context(), f.Path, content, changedLines)
+			if err != nil {
+				continue
+			}
+
+			// Find references
+			spans, err = lsp.FindReferences(r.Context(), currentSession.Repo.Root, spans, f.Path)
+			if err != nil {
+				log.Printf("LSP error for %s: %v", f.Path, err)
+			} else {
+				log.Printf("Found %d spans with references for %s", len(spans), f.Path)
+			}
+
+			f.ChangedSpans = spans
+			results = append(results, f)
 		}
+
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(session)
-	})
+		json.NewEncoder(w).Encode(results)
+	}))
 
 	if frontendFS != nil {
 		// Serve static files from the embedded frontend filesystem
