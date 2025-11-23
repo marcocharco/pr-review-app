@@ -72,6 +72,19 @@ type Commit struct {
 	Ref string `json:"ref"`
 }
 
+type MergeRequest struct {
+	CommitTitle   string `json:"commit_title,omitempty"`
+	CommitMessage string `json:"commit_message,omitempty"`
+	MergeMethod   string `json:"merge_method"` // merge, squash, rebase
+	SHA           string `json:"sha,omitempty"`
+}
+
+type MergeResponse struct {
+	SHA     string `json:"sha"`
+	Merged  bool   `json:"merged"`
+	Message string `json:"message"`
+}
+
 func NewClient(token string) *Client {
 	return &Client{Token: token}
 }
@@ -220,6 +233,48 @@ func (c *Client) PostComment(ctx context.Context, owner, repo string, prNumber i
 	}
 
 	return &comment, nil
+}
+
+func (c *Client) MergePR(ctx context.Context, owner, repo string, prNumber int, mergeReq MergeRequest) (*MergeResponse, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d/merge", owner, repo, prNumber)
+	
+	bodyBytes, err := json.Marshal(mergeReq)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// GitHub returns 200 OK for successful merge
+	ifkz := resp.StatusCode
+	if ifkz != http.StatusOK {
+		var errResp struct {
+			Message string `json:"message"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, fmt.Errorf("github api error: %s - %s", resp.Status, errResp.Message)
+	}
+
+	var mergeResp MergeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&mergeResp); err != nil {
+		return nil, err
+	}
+
+	return &mergeResp, nil
 }
 
 func ParseRemote(remote string) (string, string, error) {

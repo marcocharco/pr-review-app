@@ -109,6 +109,12 @@ func main() {
 		return client.PostComment(ctx, owner, repo, prNum, req)
 	}
 
+	var merger server.Merger
+	merger = func(ctx context.Context, req github.MergeRequest) (*github.MergeResponse, error) {
+		fmt.Printf("Merging PR #%d via %s...\n", prNum, req.MergeMethod)
+		return client.MergePR(ctx, owner, repo, prNum, req)
+	}
+
 	// Initial fetch to ensure it works
 	session, err := generator(ctx)
 	if err != nil {
@@ -132,7 +138,7 @@ func main() {
 		frontendFS = nil
 	}
 
-	srv, err := server.Start(ctx, generator, poster, frontendFS, devMode)
+	srv, err := server.Start(ctx, generator, poster, merger, frontendFS, devMode)
 	if err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}
