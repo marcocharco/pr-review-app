@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"embed"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/joho/godotenv"
@@ -97,6 +99,35 @@ func main() {
 	}
 
 	client := github.NewClient(config.AccessToken)
+
+	// Fetch PR to check branch
+	pr, err := client.FetchPR(ctx, owner, repo, prNum)
+	if err != nil {
+		log.Fatalf("failed to fetch PR details: %v", err)
+	}
+
+	if pr.Head.Ref != repoInfo.Branch {
+		fmt.Printf("You are on branch '%s', but PR #%d is for branch '%s'.\n", repoInfo.Branch, prNum, pr.Head.Ref)
+		fmt.Print("Switch to that branch? [Y/n] ")
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(response)
+		if response == "" || strings.ToLower(response) == "y" || strings.ToLower(response) == "yes" {
+			fmt.Println("Fetching latest changes...")
+			if err := git.Fetch(ctx); err != nil {
+				log.Printf("warning: git fetch failed: %v", err)
+			}
+			fmt.Printf("Checking out %s...\n", pr.Head.Ref)
+			if err := git.Checkout(ctx, pr.Head.Ref); err != nil {
+				log.Fatalf("failed to checkout branch: %v", err)
+			}
+			// Update repoInfo
+			repoInfo, err = git.RepoInfo(ctx)
+			if err != nil {
+				log.Printf("warning: failed to refresh repo info: %v", err)
+			}
+		}
+	}
 
 	var generator server.SessionGenerator
 	generator = func(ctx context.Context) (types.Session, error) {

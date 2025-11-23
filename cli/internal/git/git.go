@@ -48,3 +48,13 @@ func RepoInfo(ctx context.Context) (types.RepoInfo, error) {
 		Remote: remote,
 	}, nil
 }
+
+func Fetch(ctx context.Context) error {
+	_, err := gitcmd(ctx, "", "fetch")
+	return err
+}
+
+func Checkout(ctx context.Context, branch string) error {
+	_, err := gitcmd(ctx, "", "checkout", branch)
+	return err
+}
