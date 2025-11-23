@@ -578,7 +578,7 @@ export default function App() {
       >
         <div className="flex items-center gap-2 text-zinc-100 font-medium text-lg tracking-tight">
           <GitPullRequest className="text-blue-500" size={20} />
-          <span>CanvasReview</span>
+          <span>Contify</span>
         </div>
 
         <div className="flex items-center gap-4">
