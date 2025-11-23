@@ -14,6 +14,7 @@ export const FileNode = ({
   // Start minimized if related, otherwise expanded
   const [expanded, setExpanded] = useState(data.status !== "related");
   const rootRef = useRef<HTMLDivElement>(null);
+  const lastSentHeight = useRef<number>(0);
 
   const hasAnyReferences = useMemo(
     () =>
@@ -36,17 +37,18 @@ export const FileNode = ({
     const el = rootRef.current;
     if (!el || !onSize) return;
 
-    const updateSize = () => {
+    const sendHeight = () => {
       const height = Math.round(el.getBoundingClientRect().height / zoom);
-      onSize(node.id, height);
+      if (height !== lastSentHeight.current) {
+        lastSentHeight.current = height;
+        onSize(node.id, height);
+      }
     };
 
-    updateSize();
+    sendHeight();
+    requestAnimationFrame(sendHeight);
 
-    // Force update after a frame to ensure layout is settled, especially after expansion
-    requestAnimationFrame(updateSize);
-
-    const observer = new ResizeObserver(() => updateSize());
+    const observer = new ResizeObserver(() => sendHeight());
     observer.observe(el);
 
     return () => {
@@ -57,11 +59,8 @@ export const FileNode = ({
   return (
     <div
       ref={rootRef}
-      style={{
-        ...style,
-        maxHeight: expanded ? 960 : 64,
-      }}
-      className={`absolute rounded-md border border-[#27272a] bg-[#18181b] w-[500px] shadow-2xl shadow-black/50 flex flex-col transition-[max-height,transform,box-shadow,background-color,border-color] duration-200 ease-out ${
+      style={style}
+      className={`absolute rounded-md border border-[#27272a] bg-[#18181b] w-[500px] shadow-2xl shadow-black/50 flex flex-col transition-colors ${
         expanded ? "h-auto" : "h-12 overflow-hidden"
       } ${data.status === "removed" ? "opacity-60" : ""} ${
         data.status === "related" ? "border-zinc-700 border-dashed" : ""
