@@ -11,6 +11,7 @@ export default function App() {
   const [repoInfo, setRepoInfo] = useState<{
     remote: string;
     branch: string;
+    repoName: string;
   } | null>(null);
 
   // Canvas State
@@ -298,15 +299,18 @@ export default function App() {
         setRepoInfo({
           remote: session.repo.remote,
           branch: session.repo.branch,
+          repoName: session.repo.repoName,
         });
       }
 
       // Map session files to FileData
-      const files: FileData[] = session.files.map((f: { path: string; status: any; patch: string }) => ({
-        filename: f.path,
-        status: f.status,
-        patch: f.patch,
-      }));
+      const files: FileData[] = session.files.map(
+        (f: { path: string; status: any; patch: string }) => ({
+          filename: f.path,
+          status: f.status,
+          patch: f.patch,
+        }),
+      );
 
       processFilesToLayout(files);
     } catch (err) {
@@ -339,7 +343,7 @@ export default function App() {
           {repoInfo && (
             <div className="flex items-center gap-2 text-sm text-zinc-400">
               <span className="text-zinc-200 font-medium">
-                {repoInfo.remote}
+                {repoInfo.repoName}
               </span>
               <span className="text-zinc-600">/</span>
               <span className="text-zinc-200">{repoInfo.branch}</span>

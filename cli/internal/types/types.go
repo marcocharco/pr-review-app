@@ -2,11 +2,12 @@ package types
 
 // RepoInfo holds basic git context for the session.
 type RepoInfo struct {
-	Root   string `json:"root"`
-	Branch string `json:"branch"`
-	Head   string `json:"head"`
-	Base   string `json:"base"`
-	Remote string `json:"remote"`
+	Root     string `json:"root"`
+	Branch   string `json:"branch"`
+	Head     string `json:"head"`
+	Base     string `json:"base"`
+	Remote   string `json:"remote"`
+	RepoName string `json:"repoName"`
 }
 
 // FileDiff captures a single file's patch and current content.

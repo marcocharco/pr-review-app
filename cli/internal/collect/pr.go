@@ -41,7 +41,14 @@ func BuildPRSession(ctx context.Context, prNumber int, token string) (types.Sess
 	}
 
 	return types.Session{
-		Repo:  repoInfo,
+		Repo: types.RepoInfo{
+			RepoName: repo,
+			Root:     repoInfo.Root,
+			Branch:   repoInfo.Branch,
+			Head:     repoInfo.Head,
+			Base:     repoInfo.Base,
+			Remote:   repoInfo.Remote,
+		},
 		Files: files,
 		Summary: types.Summary{
 			Files: len(files),
