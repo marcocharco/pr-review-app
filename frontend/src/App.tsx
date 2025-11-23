@@ -571,8 +571,6 @@ export default function App() {
             </div>
           )}
 
-          <div className="h-6 w-px bg-[#27272a] mx-1" />
-
           <button
             onClick={fetchSession}
             disabled={isLoading}
