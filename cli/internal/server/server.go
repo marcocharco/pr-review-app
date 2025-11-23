@@ -21,9 +21,23 @@ type Server struct {
 type SessionGenerator func(context.Context) (types.Session, error)
 
 // Start serves the given session at /session and the static web assets from frontendFS at /.
-func Start(ctx context.Context, generator SessionGenerator, frontendFS fs.FS) (*Server, error) {
+// If devMode is true, uses a fixed port (8080) for easier Vite proxying.
+func Start(ctx context.Context, generator SessionGenerator, frontendFS fs.FS, devMode bool) (*Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/session", func(w http.ResponseWriter, r *http.Request) {
+		// Add CORS headers for dev mode
+		if devMode {
+			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			
+			// Handle preflight requests
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+		}
+		
 		session, err := generator(r.Context())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -37,15 +51,30 @@ func Start(ctx context.Context, generator SessionGenerator, frontendFS fs.FS) (*
 		// Serve static files from the embedded frontend filesystem
 		fileServer := http.FileServer(http.FS(frontendFS))
 		mux.Handle("/", fileServer)
+	} else if !devMode {
+		// In production without frontend, return 404 for root
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		})
 	}
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	var addr string
+	if devMode {
+		addr = "127.0.0.1:8080"
+	} else {
+		addr = "127.0.0.1:0"
+	}
+	
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
 
 	srv := &http.Server{Handler: mux}
 	go func() {
+		if devMode {
+			log.Printf("API server listening on %s", addr)
+		}
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("server error: %v", err)
 		}

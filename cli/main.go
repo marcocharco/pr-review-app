@@ -63,20 +63,30 @@ func main() {
 		fmt.Printf("Logged in as %s\n", config.User)
 	}
 
-	var generator server.SessionGenerator
-	if len(os.Args) > 1 {
-		arg := os.Args[1]
-		prNum, err := strconv.Atoi(arg)
-		if err != nil {
-			log.Fatalf("invalid PR number argument: %v", err)
+	// Check for dev mode (via --dev flag or DEV env var)
+	devMode := os.Getenv("DEV") == "true"
+	var prNum int
+	for _, arg := range os.Args[1:] {
+		if arg == "--dev" {
+			devMode = true
+		} else if prNum == 0 {
+			// First non-flag argument is the PR number
+			var err error
+			prNum, err = strconv.Atoi(arg)
+			if err != nil {
+				log.Fatalf("invalid PR number argument: %v", err)
+			}
 		}
+	}
 
-		generator = func(ctx context.Context) (types.Session, error) {
-			fmt.Printf("Fetching PR #%d...\n", prNum)
-			return collect.BuildPRSession(ctx, prNum, config.AccessToken)
-		}
-	} else {
+	if prNum == 0 {
 		log.Fatal("Please provide a PR number as an argument.")
+	}
+
+	var generator server.SessionGenerator
+	generator = func(ctx context.Context) (types.Session, error) {
+		fmt.Printf("Fetching PR #%d...\n", prNum)
+		return collect.BuildPRSession(ctx, prNum, config.AccessToken)
 	}
 
 	// Initial fetch to ensure it works
@@ -86,22 +96,41 @@ func main() {
 	}
 	fmt.Printf("Loaded %d files from PR.\n", len(session.Files))
 
-	// Get embedded frontend filesystem
-	frontendFS, err := getFrontendFS()
-	if err != nil {
-		log.Printf("warning: failed to load embedded frontend: %v", err)
-		log.Printf("  The tool will work but the web UI won't be available.")
+	var frontendFS fs.FS
+	if !devMode {
+		// Get embedded frontend filesystem for production
+		var err error
+		frontendFS, err = getFrontendFS()
+		if err != nil {
+			log.Printf("warning: failed to load embedded frontend: %v", err)
+			log.Printf("  The tool will work but the web UI won't be available.")
+			frontendFS = nil
+		}
+	} else {
+		fmt.Println("Dev mode: Using Vite dev server for frontend")
+		fmt.Println("  Make sure 'npm run dev' is running in the frontend/ directory")
 		frontendFS = nil
 	}
 
-	srv, err := server.Start(ctx, generator, frontendFS)
+	srv, err := server.Start(ctx, generator, frontendFS, devMode)
 	if err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}
 
-	url := srv.BaseURL
-	if err := browser.Open(url); err != nil {
-		log.Printf("warning: could not open browser automatically: %v", err)
+	if devMode {
+		// In dev mode, tell user to use the Vite dev server
+		devURL := "http://localhost:5173"
+		fmt.Printf("\n✓ API server running at: %s\n", srv.BaseURL)
+		fmt.Printf("✓ Ready for Vite dev server to proxy /session requests\n")
+		fmt.Printf("\nNow start the frontend dev server:\n")
+		fmt.Printf("  cd ../frontend && npm run dev\n\n")
+		fmt.Printf("Then open: %s\n\n", devURL)
+	} else {
+		url := srv.BaseURL
+		fmt.Printf("Server running at: %s\n", url)
+		if err := browser.Open(url); err != nil {
+			log.Printf("warning: could not open browser automatically: %v", err)
+		}
 	}
 
 	<-ctx.Done()
