@@ -113,6 +113,10 @@ func AnalyzeFile(ctx context.Context, filePath string, content []byte, changedLi
 }
 
 func getLanguage(filename string) *sitter.Language {
+	if isGenerated(filename) {
+		return nil
+	}
+
 	if strings.HasSuffix(filename, ".go") {
 		return golang.GetLanguage()
 	}
@@ -126,6 +130,26 @@ func getLanguage(filename string) *sitter.Language {
 		return tsx.GetLanguage()
 	}
 	return nil
+}
+
+func isGenerated(filename string) bool {
+	// Common generated file patterns
+	if strings.HasSuffix(filename, ".min.js") ||
+		strings.HasSuffix(filename, ".pb.go") ||
+		strings.HasSuffix(filename, "_gen.go") ||
+		strings.HasSuffix(filename, "generated.go") {
+		return true
+	}
+
+	// Common lock files (though usually not matching extension checks above, added for completeness)
+	if strings.HasSuffix(filename, "package-lock.json") ||
+		strings.HasSuffix(filename, "yarn.lock") ||
+		strings.HasSuffix(filename, "pnpm-lock.yaml") ||
+		strings.HasSuffix(filename, "go.sum") {
+		return true
+	}
+
+	return false
 }
 
 func findEnclosingSymbol(node *sitter.Node) *sitter.Node {
@@ -166,4 +190,3 @@ func getNodeName(content []byte, node *sitter.Node) string {
 
 	return node.Type() // Fallback
 }
-
