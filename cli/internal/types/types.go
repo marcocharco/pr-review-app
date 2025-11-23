@@ -14,12 +14,21 @@ type RepoInfo struct {
 	PRStatus string `json:"prStatus"`
 }
 
+// ChangedSpan represents a span of code that has changed.
+type ChangedSpan struct {
+	Name  string `json:"name"`
+	Kind  string `json:"kind"`
+	Start int    `json:"start"`
+	End   int    `json:"end"`
+}
+
 // FileDiff captures a single file's patch and current content.
 type FileDiff struct {
-	Path     string `json:"path"`
-	Status   string `json:"status"`
-	Language string `json:"language,omitempty"`
-	Patch    string `json:"patch"`
+	Path         string        `json:"path"`
+	Status       string        `json:"status"`
+	Language     string        `json:"language,omitempty"`
+	Patch        string        `json:"patch"`
+	ChangedSpans []ChangedSpan `json:"changedSpans,omitempty"`
 }
 
 // Summary holds aggregate stats.
