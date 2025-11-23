@@ -35,16 +35,6 @@ func RepoInfo(ctx context.Context) (types.RepoInfo, error) {
 	if err != nil {
 		return types.RepoInfo{}, err
 	}
-	// ref: https://stackoverflow.com/questions/28666357/how-to-get-default-git-branch
-	baseBranch, err := gitcmd(ctx, root, "rev-parse", "--abbrev-ref", "origin/HEAD")
-	if err != nil {
-		return types.RepoInfo{}, fmt.Errorf("failed to determine default branch: %w", err)
-	}
-	// get merge base hash
-	base, err := gitcmd(ctx, root, "merge-base", baseBranch, "HEAD")
-	if err != nil {
-		return types.RepoInfo{}, fmt.Errorf("failed to find merge-base with %s: %w", baseBranch, err)
-	}
 
 	// ref: https://stackoverflow.com/questions/4089430/how-to-determine-the-url-that-a-local-git-repository-was-originally-cloned-from
 	remote, err := gitcmd(ctx, root, "config", "--get", "remote.origin.url")
@@ -55,7 +45,6 @@ func RepoInfo(ctx context.Context) (types.RepoInfo, error) {
 		Root:   root,
 		Branch: branch,
 		Head:   head,
-		Base:   base,
 		Remote: remote,
 	}, nil
 }

@@ -5,7 +5,6 @@ type RepoInfo struct {
 	Root     string `json:"root"`
 	Branch   string `json:"branch"`
 	Head     string `json:"head"`
-	Base     string `json:"base"`
 	Remote   string `json:"remote"`
 	RepoName string `json:"repoName"`
 }
