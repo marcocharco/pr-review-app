@@ -2,7 +2,6 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { Maximize2, Minimize2, MessageSquare, Plus } from "lucide-react";
 import type { FileNodeProps, Comment } from "../types";
 import { getFileIcon, getStatusColor } from "../utils/fileUtils";
-import { LineCommentMarker } from "./LineCommentMarker";
 import { CommentThread } from "./CommentThread";
 import { CommentInput } from "./CommentInput";
 
@@ -33,12 +32,25 @@ export const FileNode = ({
   currentUser,
 }: FileNodeWithCommentsProps) => {
   const [expanded, setExpanded] = useState(true);
-  const [selectedLine, setSelectedLine] = useState<number | null>(null);
   const [showCommentInput, setShowCommentInput] = useState(false);
   const [commentingLine, setCommentingLine] = useState<number | null>(null);
   const [expandedCommentLines, setExpandedCommentLines] = useState<Set<number>>(
     new Set()
   );
+
+  useEffect(() => {
+    if (comments.length > 0) {
+      const linesWithComments = new Set<number>();
+      comments.forEach((c) => {
+        if (c.type === "line" && typeof c.line === "number") {
+          linesWithComments.add(c.line);
+        } else if (c.type === "selection" && typeof c.startLine === "number") {
+          linesWithComments.add(c.startLine);
+        }
+      });
+      setExpandedCommentLines(linesWithComments);
+    }
+  }, [comments]);
   const [textSelection, setTextSelection] = useState<{
     startLine: number;
     endLine: number;
@@ -58,7 +70,6 @@ export const FileNode = ({
     const lineNumbers = new Map<number, number>();
     let currentLineNumber = 0;
     let addedLines = 0;
-    let removedLines = 0;
 
     lines.forEach((line, index) => {
       if (line.startsWith("@@")) {
@@ -88,8 +99,8 @@ export const FileNode = ({
   const commentsByLine = useMemo(() => {
     const map = new Map<number, Comment[]>();
     comments.forEach((comment) => {
-      if (comment.type === "line" && comment.lineNumber !== undefined) {
-        const line = comment.lineNumber;
+      if (comment.type === "line" && comment.line !== undefined) {
+        const line = comment.line;
         if (!map.has(line)) {
           map.set(line, []);
         }
@@ -118,7 +129,6 @@ export const FileNode = ({
     if (lineNumber === null) return;
     setCommentingLine(lineNumber);
     setShowCommentInput(true);
-    setSelectedLine(lineNumber);
   };
 
   // Handle text selection
@@ -172,16 +182,7 @@ export const FileNode = ({
 
     setShowCommentInput(false);
     setCommentingLine(null);
-    setSelectedLine(null);
     setTextSelection(null);
-  };
-
-  const handleReply = async (body: string) => {
-    if (!onReplyComment || selectedLine === null) return;
-    const lineComments = commentsByLine.get(selectedLine) || [];
-    if (lineComments.length > 0) {
-      await onReplyComment(lineComments[0].id, body);
-    }
   };
 
   const handleEdit = async (commentId: number, body: string) => {
@@ -192,18 +193,6 @@ export const FileNode = ({
   const handleDelete = async (commentId: number) => {
     if (!onDeleteComment) return;
     await onDeleteComment(commentId);
-  };
-
-  const toggleCommentExpansion = (lineNumber: number) => {
-    setExpandedCommentLines((prev) => {
-      const next = new Set(prev);
-      if (next.has(lineNumber)) {
-        next.delete(lineNumber);
-      } else {
-        next.add(lineNumber);
-      }
-      return next;
-    });
   };
 
   const getCommentCountForLine = (lineNumber: number | null): number => {
@@ -274,7 +263,7 @@ export const FileNode = ({
                 <CommentThread
                   key={comment.id}
                   comment={comment}
-                  onReply={handleReply}
+                  onReply={(body) => onReplyComment?.(comment.id, body)}
                   onEdit={handleEdit}
                   onDelete={handleDelete}
                   isSubmitting={isSubmitting}
@@ -332,19 +321,6 @@ export const FileNode = ({
                             <span className="text-[10px] text-zinc-600 font-mono">
                               {lineNumber}
                             </span>
-                            {/* {hasComments ? (
-                              <LineCommentMarker
-                                lineNumber={lineNumber}
-                                commentCount={commentCount}
-                                onClick={() =>
-                                  toggleCommentExpansion(lineNumber)
-                                }
-                                hasActiveComments={hasComments}
-                              />
-                            ) : (
-
-                            )} */}
-
                             {/* Add Comment Plus Button */}
                             <button
                               onClick={() => handleLineClick(lineNumber)}
@@ -383,7 +359,9 @@ export const FileNode = ({
                               >
                                 <CommentThread
                                   comment={comment}
-                                  onReply={handleReply}
+                                  onReply={(body) =>
+                                    onReplyComment?.(comment.id, body)
+                                  }
                                   onEdit={handleEdit}
                                   onDelete={handleDelete}
                                   isSubmitting={isSubmitting}
@@ -400,7 +378,6 @@ export const FileNode = ({
                                 onCancel={() => {
                                   setShowCommentInput(false);
                                   setCommentingLine(null);
-                                  setSelectedLine(null);
                                 }}
                                 placeholder="Leave a comment"
                                 isSubmitting={isSubmitting}

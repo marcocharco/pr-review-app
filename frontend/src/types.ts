@@ -20,25 +20,27 @@ export interface FileNodeProps {
 
 export interface GitHubUser {
   login: string;
-  name?: string;
   avatar_url: string;
   html_url: string;
+  name?: string;
 }
 
 export type CommentType = "line" | "selection" | "file";
 
 export interface Comment {
   id: number;
-  fileId: string;
-  type: CommentType;
-  lineNumber?: number;
+  path: string;
+  line?: number;
   startLine?: number;
-  endLine?: number;
   side: "LEFT" | "RIGHT";
   body: string;
-  author: GitHubUser;
-  createdAt: string;
-  updatedAt: string;
+  user: GitHubUser;
+  created_at: string;
+  updated_at: string;
+  commit_id: string;
+  in_reply_to_id?: number;
+
+  // Frontend derived
+  type: CommentType;
   replies: Comment[];
-  resolved?: boolean;
 }

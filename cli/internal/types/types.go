@@ -24,10 +24,33 @@ type Summary struct {
 	Del   int `json:"del"`
 }
 
+// User represents a GitHub user.
+type User struct {
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatar_url"`
+	HTMLURL   string `json:"html_url"`
+}
+
+// Comment represents a GitHub PR review comment.
+type Comment struct {
+	ID          int64  `json:"id"`
+	Body        string `json:"body"`
+	Path        string `json:"path"`
+	Line        int    `json:"line"`
+	StartLine   *int   `json:"start_line,omitempty"`
+	Side        string `json:"side"`
+	User        User   `json:"user"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+	CommitID    string `json:"commit_id"`
+	InReplyToID *int64 `json:"in_reply_to_id,omitempty"`
+}
+
 // Session is the payload exposed to the viewer.
 type Session struct {
 	Repo      RepoInfo   `json:"repo"`
 	Files     []FileDiff `json:"files"`
+	Comments  []Comment  `json:"comments"`
 	Summary   Summary    `json:"summary"`
 	Generated string     `json:"generatedAt"`
 }

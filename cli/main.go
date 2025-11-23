@@ -16,6 +16,8 @@ import (
 	"github.com/marcocharco/pr-review-app/cli/internal/auth"
 	"github.com/marcocharco/pr-review-app/cli/internal/browser"
 	"github.com/marcocharco/pr-review-app/cli/internal/collect"
+	"github.com/marcocharco/pr-review-app/cli/internal/git"
+	"github.com/marcocharco/pr-review-app/cli/internal/github"
 	"github.com/marcocharco/pr-review-app/cli/internal/server"
 	"github.com/marcocharco/pr-review-app/cli/internal/types"
 )
@@ -83,10 +85,28 @@ func main() {
 		log.Fatal("Please provide a PR number as an argument.")
 	}
 
+	// Prepare for CommentPoster
+	repoInfo, err := git.RepoInfo(ctx)
+	if err != nil {
+		log.Fatalf("failed to get repo info: %v", err)
+	}
+
+	owner, repo, err := github.ParseRemote(repoInfo.Remote)
+	if err != nil {
+		log.Fatalf("failed to parse remote: %v", err)
+	}
+
+	client := github.NewClient(config.AccessToken)
+
 	var generator server.SessionGenerator
 	generator = func(ctx context.Context) (types.Session, error) {
 		fmt.Printf("Fetching PR #%d...\n", prNum)
 		return collect.BuildPRSession(ctx, prNum, config.AccessToken)
+	}
+
+	var poster server.CommentPoster
+	poster = func(ctx context.Context, req github.CommentRequest) (*github.PRComment, error) {
+		return client.PostComment(ctx, owner, repo, prNum, req)
 	}
 
 	// Initial fetch to ensure it works
@@ -112,7 +132,7 @@ func main() {
 		frontendFS = nil
 	}
 
-	srv, err := server.Start(ctx, generator, frontendFS, devMode)
+	srv, err := server.Start(ctx, generator, poster, frontendFS, devMode)
 	if err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}

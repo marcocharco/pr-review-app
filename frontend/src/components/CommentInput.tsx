@@ -6,6 +6,7 @@ interface CommentInputProps {
   placeholder?: string;
   initialValue?: string;
   isSubmitting?: boolean;
+  autoFocus?: boolean;
 }
 
 export const CommentInput = ({
@@ -14,6 +15,7 @@ export const CommentInput = ({
   placeholder = "Add a comment...",
   initialValue = "",
   isSubmitting = false,
+  autoFocus = false,
 }: CommentInputProps) => {
   const [body, setBody] = useState(initialValue);
 
@@ -43,7 +45,7 @@ export const CommentInput = ({
         className="w-full bg-[#09090b] border border-[#27272a] rounded px-3 py-2 text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/50 resize-none font-sans"
         rows={3}
         disabled={isSubmitting}
-        autoFocus
+        autoFocus={autoFocus}
       />
       <div className="flex items-center justify-between font-sans">
         <span className="text-[10px] text-zinc-500">

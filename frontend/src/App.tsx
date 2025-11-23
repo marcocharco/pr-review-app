@@ -1,7 +1,18 @@
 import { AlertCircle, GitPullRequest, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileNode } from "./components/FileNode";
-import type { FileData, Node, Comment } from "./types";
+import type { FileData, Node, Comment, CommentType } from "./types";
+
+// Define payload interface to replace 'any'
+interface CommentPayload {
+  body: string;
+  path?: string;
+  side?: string;
+  commit_id: string;
+  line?: number;
+  start_line?: number;
+  in_reply_to_id?: number;
+}
 
 export default function App() {
   // Data State
@@ -12,10 +23,12 @@ export default function App() {
     remote: string;
     branch: string;
     repoName: string;
+    head: string;
   } | null>(null);
 
-  // Local Comment State (Mocking backend for now)
+  // Comment State
   const [comments, setComments] = useState<Comment[]>([]);
+  const [isPosting, setIsPosting] = useState(false);
 
   // Canvas State
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -38,7 +51,49 @@ export default function App() {
     zoomRef.current = zoom;
   }, [zoom]);
 
-  // --- Comment Handlers (Mocked) ---
+  // --- Comment Processing ---
+
+  const processComments = useCallback((rawComments: Comment[]): Comment[] => {
+    const commentMap = new Map<number, Comment>();
+    const rootComments: Comment[] = [];
+
+    // First pass: Init map and derive type
+    rawComments.forEach((c) => {
+      let type: CommentType = "file";
+      // Ensure line is a valid number before setting type to line/selection
+      if (typeof c.line === "number" && c.line > 0) {
+        if (c.startLine) type = "selection";
+        else type = "line";
+      }
+
+      const commentWithDerived: Comment = {
+        ...c,
+        type,
+        replies: [],
+      };
+      commentMap.set(c.id, commentWithDerived);
+    });
+
+    // Second pass: Build tree
+    rawComments.forEach((c) => {
+      const comment = commentMap.get(c.id)!;
+      if (c.in_reply_to_id) {
+        const parent = commentMap.get(c.in_reply_to_id);
+        if (parent) {
+          parent.replies.push(comment);
+        } else {
+          // Orphan reply, treat as root if parent not found
+          rootComments.push(comment);
+        }
+      } else {
+        rootComments.push(comment);
+      }
+    });
+
+    return rootComments;
+  }, []);
+
+  // --- Comment Handlers ---
 
   const handleAddComment = async (
     filePath: string,
@@ -46,73 +101,143 @@ export default function App() {
     lineNumber?: number,
     startLine?: number
   ) => {
-    const newComment: Comment = {
-      id: Date.now(),
-      fileId: filePath, // Using filename as fileId for simplicity in this mock
-      type:
-        lineNumber !== undefined
-          ? startLine !== undefined
-            ? "selection"
-            : "line"
-          : "file",
-      lineNumber,
-      startLine,
-      side: "RIGHT",
-      body,
-      author: {
-        login: "user", // Mock user
-        name: "Current User",
-        avatar_url: "https://github.com/ghost.png",
-        html_url: "",
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      replies: [],
-    };
+    if (!repoInfo?.head) {
+      console.error("No HEAD SHA available");
+      return;
+    }
 
-    setComments((prev) => [...prev, newComment]);
-  };
+    setIsPosting(true);
+    try {
+      const payload: CommentPayload = {
+        body,
+        path: filePath,
+        side: "RIGHT",
+        commit_id: repoInfo.head,
+      };
 
-  const handleEditComment = async (commentId: number, body: string) => {
-    setComments((prev) =>
-      prev.map((c) =>
-        c.id === commentId
-          ? { ...c, body, updatedAt: new Date().toISOString() }
-          : c
-      )
-    );
-  };
+      if (lineNumber) {
+        payload.line = lineNumber;
+      }
 
-  const handleDeleteComment = async (commentId: number) => {
-    setComments((prev) => prev.filter((c) => c.id !== commentId));
+      if (startLine) {
+        payload.start_line = startLine;
+      }
+
+      const response = await fetch("/comments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        // Check for 403 from backend status or error message
+        if (
+          response.status === 403 ||
+          errText.includes("Resource not accessible by integration")
+        ) {
+          alert(
+            "Permission Error: The GitHub App or Token used does not have permission to comment on this repository.\n\n" +
+              "If using a GitHub App, ensure it is installed on this repository.\n" +
+              "If using a Token, ensure it has 'repo' or 'pull_requests:write' scope.\n\n" +
+              "You can manually configure a Personal Access Token in ~/.config/pr-review/apps.json"
+          );
+          throw new Error(
+            "Permission denied: App not installed or token invalid"
+          );
+        }
+        throw new Error(errText || "Failed to post comment");
+      }
+
+      const newComment = await response.json();
+
+      const processedNewComment: Comment = {
+        ...newComment,
+        type: lineNumber ? (startLine ? "selection" : "line") : "file",
+        replies: [],
+      };
+
+      setComments((prev) => [...prev, processedNewComment]);
+    } catch (error) {
+      console.error("Failed to post comment:", error);
+      // Alert is already shown for specific errors
+      if (
+        !(error instanceof Error && error.message.includes("Permission denied"))
+      ) {
+        alert(
+          "Failed to post comment: " +
+            (error instanceof Error ? error.message : String(error))
+        );
+      }
+    } finally {
+      setIsPosting(false);
+    }
   };
 
   const handleReplyComment = async (inReplyToId: number, body: string) => {
-    const reply: Comment = {
-      id: Date.now(),
-      fileId: "", // Nested replies don't strictly need this in the UI if parent has it
-      type: "line", // inherit
-      side: "RIGHT",
-      body,
-      author: {
-        login: "user",
-        name: "Current User",
-        avatar_url: "https://github.com/ghost.png",
-        html_url: "",
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      replies: [],
-    };
+    if (!repoInfo?.head) return;
 
-    setComments((prev) =>
-      prev.map((c) => {
-        if (c.id === inReplyToId) {
-          return { ...c, replies: [...c.replies, reply] };
-        }
-        return c;
-      })
-    );
+    setIsPosting(true);
+    try {
+      const replyPayload: CommentPayload = {
+        body,
+        commit_id: repoInfo.head,
+        in_reply_to_id: inReplyToId,
+      };
+
+      const response = await fetch("/comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(replyPayload),
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const newComment = await response.json();
+      const processedNewComment: Comment = {
+        ...newComment,
+        type: "line", // Replies inherit type context from parent usually, default to line
+        replies: [],
+      };
+
+      // Update state to nest this reply
+      setComments((prev) => {
+        const addReply = (nodes: Comment[]): Comment[] => {
+          return nodes.map((node) => {
+            if (node.id === inReplyToId) {
+              return {
+                ...node,
+                replies: [...node.replies, processedNewComment],
+              };
+            }
+            if (node.replies.length > 0) {
+              return { ...node, replies: addReply(node.replies) };
+            }
+            return node;
+          });
+        };
+
+        return addReply(prev);
+      });
+    } catch (e) {
+      console.error(e);
+      alert("Failed to reply");
+    } finally {
+      setIsPosting(false);
+    }
+  };
+
+  // Edit/Delete not implemented in backend yet, so we leave them empty or basic.
+  const handleEditComment = async (commentId: number, body: string) => {
+    console.warn("Edit not implemented in backend yet", commentId, body);
+  };
+
+  const handleDeleteComment = async (commentId: number) => {
+    console.warn("Delete not implemented in backend yet", commentId);
   };
 
   // --- Canvas Logic ---
@@ -380,17 +505,26 @@ export default function App() {
           remote: session.repo.remote,
           branch: session.repo.branch,
           repoName: session.repo.repoName,
+          head: session.repo.head,
         });
       }
 
       // Map session files to FileData
       const files: FileData[] = session.files.map(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (f: { path: string; status: any; patch: string }) => ({
           filename: f.path,
           status: f.status,
           patch: f.patch,
         })
       );
+
+      // Process comments
+      if (session.comments) {
+        setComments(processComments(session.comments));
+      } else {
+        setComments([]);
+      }
 
       processFilesToLayout(files);
     } catch (err) {
@@ -401,7 +535,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [processComments]);
 
   useEffect(() => {
     fetchSession();
@@ -459,11 +593,14 @@ export default function App() {
         className={`flex-1 relative overflow-hidden bg-[#09090b] canvas-bg ${
           isDragging ? "cursor-grabbing" : "cursor-grab"
         }`}
-        style={{
-          touchAction: "none",
-          overscrollBehavior: "contain",
-          userSelect: "none",
-        }}
+        style={
+          {
+            touchAction: "none",
+            overscrollBehavior: "contain",
+            userSelect: "none",
+            onMouseDown: handleMouseDown,
+          } as React.CSSProperties
+        }
         onMouseDown={handleMouseDown}
       >
         {/* Dot Grid Pattern */}
@@ -495,14 +632,13 @@ export default function App() {
                   transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
                   willChange: "transform",
                 }}
-                comments={comments.filter(
-                  (c) => c.fileId === node.data.filename
-                )}
+                comments={comments.filter((c) => c.path === node.data.filename)}
                 onAddComment={handleAddComment}
                 onEditComment={handleEditComment}
                 onDeleteComment={handleDeleteComment}
                 onReplyComment={handleReplyComment}
-                currentUser="user"
+                isSubmitting={isPosting}
+                currentUser="user" // Placeholder
               />
             ))}
           </div>

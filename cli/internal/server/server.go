@@ -9,7 +9,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 
+	"github.com/marcocharco/pr-review-app/cli/internal/github"
 	"github.com/marcocharco/pr-review-app/cli/internal/types"
 )
 
@@ -19,10 +21,11 @@ type Server struct {
 }
 
 type SessionGenerator func(context.Context) (types.Session, error)
+type CommentPoster func(context.Context, github.CommentRequest) (*github.PRComment, error)
 
 // Start serves the given session at /session and the static web assets from frontendFS at /.
 // If devMode is true, uses a fixed port (8080) for easier Vite proxying.
-func Start(ctx context.Context, generator SessionGenerator, frontendFS fs.FS, devMode bool) (*Server, error) {
+func Start(ctx context.Context, generator SessionGenerator, poster CommentPoster, frontendFS fs.FS, devMode bool) (*Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/session", func(w http.ResponseWriter, r *http.Request) {
 		// Add CORS headers for dev mode
@@ -45,6 +48,44 @@ func Start(ctx context.Context, generator SessionGenerator, frontendFS fs.FS, de
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(session)
+	})
+
+	mux.HandleFunc("/comments", func(w http.ResponseWriter, r *http.Request) {
+		if devMode {
+			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req github.CommentRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		comment, err := poster(r.Context(), req)
+		if err != nil {
+			status := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "403") || strings.Contains(err.Error(), "Forbidden") {
+				status = http.StatusForbidden
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(comment)
 	})
 
 	if frontendFS != nil {

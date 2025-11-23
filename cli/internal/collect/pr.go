@@ -22,9 +22,21 @@ func BuildPRSession(ctx context.Context, prNumber int, token string) (types.Sess
 	}
 
 	client := github.NewClient(token)
+
+	// Fetch PR details first to get the head SHA
+	pr, err := client.FetchPR(ctx, owner, repo, prNumber)
+	if err != nil {
+		return types.Session{}, fmt.Errorf("failed to fetch PR details: %w", err)
+	}
+
 	prFiles, err := client.FetchPRFiles(ctx, owner, repo, prNumber)
 	if err != nil {
 		return types.Session{}, fmt.Errorf("failed to fetch PR files: %w", err)
+	}
+
+	prComments, err := client.FetchPRComments(ctx, owner, repo, prNumber)
+	if err != nil {
+		return types.Session{}, fmt.Errorf("failed to fetch PR comments: %w", err)
 	}
 
 	var files []types.FileDiff
@@ -40,15 +52,38 @@ func BuildPRSession(ctx context.Context, prNumber int, token string) (types.Sess
 		deleted += f.Deletions
 	}
 
+	var comments []types.Comment
+	for _, c := range prComments {
+		comments = append(comments, types.Comment{
+			ID:          c.ID,
+			Body:        c.Body,
+			Path:        c.Path,
+			Line:        c.Line,
+			StartLine:   c.StartLine,
+			Side:        c.Side,
+			User: types.User{
+				Login:     c.User.Login,
+				AvatarURL: c.User.AvatarURL,
+				HTMLURL:   c.User.HTMLURL,
+			},
+			CreatedAt:   c.CreatedAt,
+			UpdatedAt:   c.UpdatedAt,
+			CommitID:    c.CommitID,
+			InReplyToID: c.InReplyToID,
+		})
+	}
+
 	return types.Session{
 		Repo: types.RepoInfo{
 			RepoName: repo,
 			Root:     repoInfo.Root,
-			Branch:   repoInfo.Branch,
-			Head:     repoInfo.Head,
-			Remote:   repoInfo.Remote,
+			Branch:   repoInfo.Branch, // This is the local branch, maybe we should use PR branch?
+			// Use the PR's head SHA instead of local HEAD
+			Head:   pr.Head.SHA,
+			Remote: repoInfo.Remote,
 		},
-		Files: files,
+		Files:    files,
+		Comments: comments,
 		Summary: types.Summary{
 			Files: len(files),
 			Add:   added,
