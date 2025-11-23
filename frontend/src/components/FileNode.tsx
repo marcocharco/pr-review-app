@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, memo } from "react";
 import { Maximize2, Minimize2, MessageSquare, Plus } from "lucide-react";
 import { diffChars, type Change } from "diff";
 import type { FileNodeProps, Comment } from "../types";
@@ -10,636 +10,653 @@ import {
   highlightToHtmlLines,
 } from "../utils/highlight";
 
-export const FileNode = ({
-  node,
-  style,
-  zoom,
-  comments = [],
-  onAddComment,
-  onEditComment,
-  onDeleteComment,
-  onReplyComment,
-  isSubmitting = false,
-  currentUser,
-  onAnalyze,
-  onSize,
-}: FileNodeProps) => {
-  const { data } = node;
-  // Start minimized if related, otherwise expanded
-  const [expanded, setExpanded] = useState(data.status !== "related");
-  const [showCommentInput, setShowCommentInput] = useState(false);
-  const [commentingLine, setCommentingLine] = useState<number | null>(null);
-  const [expandedCommentLines, setExpandedCommentLines] = useState<Set<number>>(
-    new Set(),
-  );
-  const rootRef = useRef<HTMLDivElement>(null);
-  const hasAnyReferences = useMemo(
-    () =>
-      data.changedSpans?.some(
-        (span) => span.references && span.references.length > 0,
-      ) ?? false,
-    [data.changedSpans],
-  );
+export const FileNode = memo(
+  ({
+    node,
+    style,
+    comments = [],
+    onAddComment,
+    onEditComment,
+    onDeleteComment,
+    onReplyComment,
+    isSubmitting = false,
+    currentUser,
+    onAnalyze,
+    onSize,
+  }: FileNodeProps) => {
+    const { data } = node;
+    // Start minimized if related, otherwise expanded
+    const [expanded, setExpanded] = useState(data.status !== "related");
+    const [showCommentInput, setShowCommentInput] = useState(false);
+    const [commentingLine, setCommentingLine] = useState<number | null>(null);
+    const [expandedCommentLines, setExpandedCommentLines] = useState<
+      Set<number>
+    >(new Set());
+    const rootRef = useRef<HTMLDivElement>(null);
+    const hasAnyReferences = useMemo(
+      () =>
+        data.changedSpans?.some(
+          (span) => span.references && span.references.length > 0
+        ) ?? false,
+      [data.changedSpans]
+    );
 
-  useEffect(() => {
-    if (comments.length > 0) {
-      const linesWithComments = new Set<number>();
-      comments.forEach((c) => {
-        if (c.type === "line" && typeof c.line === "number") {
-          linesWithComments.add(c.line);
-        } else if (c.type === "selection" && typeof c.startLine === "number") {
-          linesWithComments.add(c.startLine);
+    useEffect(() => {
+      if (comments.length > 0) {
+        const linesWithComments = new Set<number>();
+        comments.forEach((c) => {
+          if (c.type === "line" && typeof c.line === "number") {
+            linesWithComments.add(c.line);
+          } else if (
+            c.type === "selection" &&
+            typeof c.startLine === "number"
+          ) {
+            linesWithComments.add(c.startLine);
+          }
+        });
+        setExpandedCommentLines(linesWithComments);
+      }
+    }, [comments]);
+    const [textSelection, setTextSelection] = useState<{
+      startLine: number;
+      endLine: number;
+      startOffset: number;
+      endOffset: number;
+    } | null>(null);
+    const diffContentRef = useRef<HTMLDivElement>(null);
+
+    const escapeHtml = (str: string) =>
+      str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    // Parse diff to extract line numbers and hunk information
+    const parsedDiff = useMemo(() => {
+      if (data.status === "related" && data.context) {
+        const lines = data.context.split("\n");
+        const lineNumbers = new Map<number, number>();
+        const startLine = data.contextStartLine || 1;
+        lines.forEach((_, i) => lineNumbers.set(i, startLine + i));
+        return {
+          lines,
+          lineNumbers,
+          wordDiffs: new Map<number, Change[]>(),
+        };
+      }
+      if (!data.patch)
+        return {
+          lines: [],
+          lineNumbers: new Map<number, number>(),
+          wordDiffs: new Map<number, Change[]>(),
+        };
+
+      const lines = data.patch.split("\n");
+      const lineNumbers = new Map<number, number>();
+      const wordDiffs = new Map<number, Change[]>();
+
+      let currentLineNumber = 0;
+      let addedLines = 0;
+
+      lines.forEach((line, index) => {
+        if (line.startsWith("@@")) {
+          // Parse hunk header: @@ -start,count +start,count @@
+          const match = line.match(
+            /@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/
+          );
+          if (match) {
+            const newStart = parseInt(match[3], 10);
+            currentLineNumber = newStart;
+            addedLines = 0;
+          }
+        } else if (line.startsWith("+") && !line.startsWith("+++")) {
+          lineNumbers.set(index, currentLineNumber + addedLines);
+          addedLines++;
+        } else if (line.startsWith("-") && !line.startsWith("---")) {
+          // removed line
+        } else if (!line.startsWith("\\")) {
+          // Context line
+          lineNumbers.set(index, currentLineNumber + addedLines);
+          addedLines++;
         }
       });
-      setExpandedCommentLines(linesWithComments);
-    }
-  }, [comments]);
-  const [textSelection, setTextSelection] = useState<{
-    startLine: number;
-    endLine: number;
-    startOffset: number;
-    endOffset: number;
-  } | null>(null);
-  const diffContentRef = useRef<HTMLDivElement>(null);
 
-  const escapeHtml = (str: string) =>
-    str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-  // Parse diff to extract line numbers and hunk information
-  const parsedDiff = useMemo(() => {
-    if (data.status === "related" && data.context) {
-      const lines = data.context.split("\n");
-      const lineNumbers = new Map<number, number>();
-      const startLine = data.contextStartLine || 1;
-      lines.forEach((_, i) => lineNumbers.set(i, startLine + i));
-      return {
-        lines,
-        lineNumbers,
-        wordDiffs: new Map<number, Change[]>(),
-      };
-    }
-    if (!data.patch)
-      return {
-        lines: [],
-        lineNumbers: new Map<number, number>(),
-        wordDiffs: new Map<number, Change[]>(),
-      };
-
-    const lines = data.patch.split("\n");
-    const lineNumbers = new Map<number, number>();
-    const wordDiffs = new Map<number, Change[]>();
-
-    let currentLineNumber = 0;
-    let addedLines = 0;
-
-    lines.forEach((line, index) => {
-      if (line.startsWith("@@")) {
-        // Parse hunk header: @@ -start,count +start,count @@
-        const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-        if (match) {
-          const newStart = parseInt(match[3], 10);
-          currentLineNumber = newStart;
-          addedLines = 0;
-        }
-      } else if (line.startsWith("+") && !line.startsWith("+++")) {
-        lineNumbers.set(index, currentLineNumber + addedLines);
-        addedLines++;
-      } else if (line.startsWith("-") && !line.startsWith("---")) {
-        // removed line
-      } else if (!line.startsWith("\\")) {
-        // Context line
-        lineNumbers.set(index, currentLineNumber + addedLines);
-        addedLines++;
-      }
-    });
-
-    // Compute word-level diffs for modified blocks
-    let i = 0;
-    while (i < lines.length) {
-      const line = lines[i];
-      if (line.startsWith("-") && !line.startsWith("---")) {
-        // Start of a deletion block
-        let delEnd = i;
-        while (
-          delEnd < lines.length &&
-          lines[delEnd].startsWith("-") &&
-          !lines[delEnd].startsWith("---")
-        ) {
-          delEnd++;
-        }
-        const delCount = delEnd - i;
-
-        // Check for following addition block
-        const addStart = delEnd;
-        let addEnd = addStart;
-        while (
-          addEnd < lines.length &&
-          lines[addEnd].startsWith("+") &&
-          !lines[addEnd].startsWith("+++")
-        ) {
-          addEnd++;
-        }
-        const addCount = addEnd - addStart;
-
-        if (delCount === addCount && delCount > 0) {
-          // Compute diffs for each pair
-          for (let k = 0; k < delCount; k++) {
-            const delLine = lines[i + k];
-            const addLine = lines[addStart + k];
-            // Skip the marker (+/-)
-            const diff = diffChars(delLine.slice(1), addLine.slice(1));
-            wordDiffs.set(i + k, diff);
-            wordDiffs.set(addStart + k, diff);
+      // Compute word-level diffs for modified blocks
+      let i = 0;
+      while (i < lines.length) {
+        const line = lines[i];
+        if (line.startsWith("-") && !line.startsWith("---")) {
+          // Start of a deletion block
+          let delEnd = i;
+          while (
+            delEnd < lines.length &&
+            lines[delEnd].startsWith("-") &&
+            !lines[delEnd].startsWith("---")
+          ) {
+            delEnd++;
           }
-          i = addEnd;
-          continue;
+          const delCount = delEnd - i;
+
+          // Check for following addition block
+          const addStart = delEnd;
+          let addEnd = addStart;
+          while (
+            addEnd < lines.length &&
+            lines[addEnd].startsWith("+") &&
+            !lines[addEnd].startsWith("+++")
+          ) {
+            addEnd++;
+          }
+          const addCount = addEnd - addStart;
+
+          if (delCount === addCount && delCount > 0) {
+            // Compute diffs for each pair
+            for (let k = 0; k < delCount; k++) {
+              const delLine = lines[i + k];
+              const addLine = lines[addStart + k];
+              // Skip the marker (+/-)
+              const diff = diffChars(delLine.slice(1), addLine.slice(1));
+              wordDiffs.set(i + k, diff);
+              wordDiffs.set(addStart + k, diff);
+            }
+            i = addEnd;
+            continue;
+          }
         }
+        i++;
       }
-      i++;
-    }
 
-    return { lines, lineNumbers, wordDiffs };
-  }, [data.patch, data.context, data.status]);
+      return { lines, lineNumbers, wordDiffs };
+    }, [data.patch, data.context, data.status]);
 
-  const highlightLanguage = useMemo(
-    () => guessLanguageFromPath(data.filename),
-    [data.filename],
-  );
+    const highlightLanguage = useMemo(
+      () => guessLanguageFromPath(data.filename),
+      [data.filename]
+    );
 
-  const diffDisplayLines = useMemo(() => {
-    if (data.status === "related") return parsedDiff.lines;
-    return parsedDiff.lines.map((line) => {
-      if (
-        line.startsWith("@@") ||
-        line.startsWith("---") ||
-        line.startsWith("+++")
-      ) {
+    const diffDisplayLines = useMemo(() => {
+      if (data.status === "related") return parsedDiff.lines;
+      return parsedDiff.lines.map((line) => {
+        if (
+          line.startsWith("@@") ||
+          line.startsWith("---") ||
+          line.startsWith("+++")
+        ) {
+          return line;
+        }
+        if (
+          line.startsWith("+") ||
+          line.startsWith("-") ||
+          line.startsWith(" ")
+        ) {
+          return line.slice(1);
+        }
         return line;
+      });
+    }, [data.status, parsedDiff.lines]);
+
+    const highlightedLines = useMemo(() => {
+      if (data.status === "related") {
+        const codeContent = data.context ?? "";
+        return highlightToHtmlLines(codeContent, highlightLanguage);
       }
-      if (line.startsWith("+") || line.startsWith("-") || line.startsWith(" ")) {
-        return line.slice(1);
-      }
-      return line;
-    });
-  }, [data.status, parsedDiff.lines]);
 
-  const highlightedLines = useMemo(() => {
-    if (data.status === "related") {
-      const codeContent = data.context ?? "";
-      return highlightToHtmlLines(codeContent, highlightLanguage);
-    }
+      // For diffs, highlight the code without diff markers so the language
+      // grammar can tokenize correctly.
+      const cleaned = diffDisplayLines.join("\n");
+      return highlightToHtmlLines(cleaned, highlightLanguage);
+    }, [data.status, data.context, diffDisplayLines, highlightLanguage]);
 
-    // For diffs, highlight the code without diff markers so the language
-    // grammar can tokenize correctly.
-    const cleaned = diffDisplayLines.join("\n");
-    return highlightToHtmlLines(cleaned, highlightLanguage);
-  }, [data.status, data.context, diffDisplayLines, highlightLanguage]);
-
-  // Group comments by line number
-  const commentsByLine = useMemo(() => {
-    const map = new Map<number, Comment[]>();
-    comments.forEach((comment) => {
-      if (comment.type === "line" && comment.line !== undefined) {
-        const line = comment.line;
-        if (!map.has(line)) {
-          map.set(line, []);
+    // Group comments by line number
+    const commentsByLine = useMemo(() => {
+      const map = new Map<number, Comment[]>();
+      comments.forEach((comment) => {
+        if (comment.type === "line" && comment.line !== undefined) {
+          const line = comment.line;
+          if (!map.has(line)) {
+            map.set(line, []);
+          }
+          map.get(line)!.push(comment);
+        } else if (
+          comment.type === "selection" &&
+          comment.startLine !== undefined
+        ) {
+          const line = comment.startLine;
+          if (!map.has(line)) {
+            map.set(line, []);
+          }
+          map.get(line)!.push(comment);
         }
-        map.get(line)!.push(comment);
-      } else if (
-        comment.type === "selection" &&
-        comment.startLine !== undefined
-      ) {
-        const line = comment.startLine;
-        if (!map.has(line)) {
-          map.set(line, []);
-        }
-        map.get(line)!.push(comment);
-      }
-    });
-    return map;
-  }, [comments]);
+      });
+      return map;
+    }, [comments]);
 
-  // Get file-level comments
-  const fileComments = useMemo(() => {
-    return comments.filter((c) => c.type === "file");
-  }, [comments]);
+    // Get file-level comments
+    const fileComments = useMemo(() => {
+      return comments.filter((c) => c.type === "file");
+    }, [comments]);
 
-  // Handle line click for commenting
-  const handleLineClick = (lineNumber: number | null) => {
-    if (lineNumber === null) return;
-    setCommentingLine(lineNumber);
-    setShowCommentInput(true);
-  };
-
-  // Handle text selection
-  useEffect(() => {
-    const handleSelection = () => {
-      const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0) {
-        setTextSelection(null);
-        return;
-      }
-
-      const range = selection.getRangeAt(0);
-      if (!diffContentRef.current?.contains(range.commonAncestorContainer)) {
-        setTextSelection(null);
-        return;
-      }
-
-      // This is a simplified version - in a real implementation,
-      // you'd need to track line elements more precisely
-      setTextSelection(null); // Simplified for now
+    // Handle line click for commenting
+    const handleLineClick = (lineNumber: number | null) => {
+      if (lineNumber === null) return;
+      setCommentingLine(lineNumber);
+      setShowCommentInput(true);
     };
 
-    document.addEventListener("selectionchange", handleSelection);
-    return () =>
-      document.removeEventListener("selectionchange", handleSelection);
-  }, []);
+    // Handle text selection
+    useEffect(() => {
+      const handleSelection = () => {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+          setTextSelection(null);
+          return;
+        }
 
-  // Handle comment submission
-  const handleAddComment = async (body: string) => {
-    if (!onAddComment) return;
+        const range = selection.getRangeAt(0);
+        if (!diffContentRef.current?.contains(range.commonAncestorContainer)) {
+          setTextSelection(null);
+          return;
+        }
 
-    if (commentingLine !== null) {
-      await onAddComment(data.filename, body, commentingLine);
-      // Ensure the new comment is visible
-      setExpandedCommentLines((prev) => new Set(prev).add(commentingLine));
-    } else if (textSelection) {
-      await onAddComment(
-        data.filename,
-        body,
-        textSelection.endLine,
-        textSelection.startLine,
-      );
-      // For text selection, we might want to expand the end line or start line
-      setExpandedCommentLines((prev) =>
-        new Set(prev).add(textSelection.endLine),
-      );
-    } else {
-      // File-level comment
-      await onAddComment(data.filename, body);
-    }
+        // This is a simplified version - in a real implementation,
+        // you'd need to track line elements more precisely
+        setTextSelection(null); // Simplified for now
+      };
 
-    setShowCommentInput(false);
-    setCommentingLine(null);
-    setTextSelection(null);
-  };
+      document.addEventListener("selectionchange", handleSelection);
+      return () =>
+        document.removeEventListener("selectionchange", handleSelection);
+    }, []);
 
-  const handleEdit = async (commentId: number, body: string) => {
-    if (!onEditComment) return;
-    await onEditComment(commentId, body);
-  };
+    // Handle comment submission
+    const handleAddComment = async (body: string) => {
+      if (!onAddComment) return;
 
-  const handleDelete = async (commentId: number) => {
-    if (!onDeleteComment) return;
-    await onDeleteComment(commentId);
-  };
+      if (commentingLine !== null) {
+        await onAddComment(data.filename, body, commentingLine);
+        // Ensure the new comment is visible
+        setExpandedCommentLines((prev) => new Set(prev).add(commentingLine));
+      } else if (textSelection) {
+        await onAddComment(
+          data.filename,
+          body,
+          textSelection.endLine,
+          textSelection.startLine
+        );
+        // For text selection, we might want to expand the end line or start line
+        setExpandedCommentLines((prev) =>
+          new Set(prev).add(textSelection.endLine)
+        );
+      } else {
+        // File-level comment
+        await onAddComment(data.filename, body);
+      }
 
-  // Report node height so the canvas can reflow around expand/collapse
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el || !onSize) return;
-
-    const sendHeight = () => {
-      const height = Math.round(el.getBoundingClientRect().height / zoom);
-      onSize(node.id, height);
+      setShowCommentInput(false);
+      setCommentingLine(null);
+      setTextSelection(null);
     };
 
-    sendHeight();
-    requestAnimationFrame(sendHeight);
+    const handleEdit = async (commentId: number, body: string) => {
+      if (!onEditComment) return;
+      await onEditComment(commentId, body);
+    };
 
-    const observer = new ResizeObserver(() => sendHeight());
-    observer.observe(el);
+    const handleDelete = async (commentId: number) => {
+      if (!onDeleteComment) return;
+      await onDeleteComment(commentId);
+    };
 
-    return () => observer.disconnect();
-  }, [node.id, onSize, expanded, zoom]);
+    // Report node height so the canvas can reflow around expand/collapse
+    useEffect(() => {
+      const el = rootRef.current;
+      if (!el || !onSize) return;
 
-  const getCommentCountForLine = (lineNumber: number | null): number => {
-    if (lineNumber === null) return 0;
-    const lineComments = commentsByLine.get(lineNumber) || [];
-    return lineComments.reduce((count, comment) => {
-      return count + 1 + comment.replies.length;
-    }, 0);
-  };
+      const sendHeight = () => {
+        const height = el.offsetHeight;
+        onSize(node.id, height);
+      };
 
-  return (
-    <div
-      ref={rootRef}
-      style={style}
-      className={`absolute rounded-md border border-[#27272a] bg-[#18181b] w-[500px] shadow-2xl shadow-black/50 flex flex-col transition-all duration-200 ${
-        expanded ? "h-auto" : "h-12 overflow-hidden"
-      } ${data.status === "removed" ? "opacity-60" : ""} ${
-        data.status === "related" ? "border-zinc-700 border-dashed" : ""
-      }`}
-    >
-      {/* Header */}
+      sendHeight();
+      requestAnimationFrame(sendHeight);
+
+      const observer = new ResizeObserver(() => sendHeight());
+      observer.observe(el);
+
+      return () => observer.disconnect();
+    }, [node.id, onSize, expanded]);
+
+    const getCommentCountForLine = (lineNumber: number | null): number => {
+      if (lineNumber === null) return 0;
+      const lineComments = commentsByLine.get(lineNumber) || [];
+      return lineComments.reduce((count, comment) => {
+        return count + 1 + comment.replies.length;
+      }, 0);
+    };
+
+    return (
       <div
-        className="h-12 px-4 border-b border-[#27272a] flex items-center justify-between cursor-pointer hover:bg-[#27272a] transition-colors group"
-        onClick={() => setExpanded(!expanded)}
+        ref={rootRef}
+        style={style}
+        className={`absolute rounded-md border border-[#27272a] bg-[#18181b] w-[500px] shadow-2xl shadow-black/50 flex flex-col transition-all duration-200 ${
+          expanded ? "h-auto" : "h-12 overflow-hidden"
+        } ${data.status === "removed" ? "opacity-60" : ""} ${
+          data.status === "related" ? "border-zinc-700 border-dashed" : ""
+        }`}
       >
-        <div className="flex items-center gap-3 overflow-hidden">
-          <div
-            className={`w-6 h-6 flex items-center justify-center rounded text-[10px] font-bold font-mono tracking-tighter ${getStatusColor(
-              data.status,
-            )}`}
-          >
-            {getFileIcon(data.filename)}
-          </div>
-          <div className="flex flex-col overflow-hidden">
-            <span
-              className="font-mono text-sm text-zinc-300 group-hover:text-white transition-colors truncate"
-              title={data.filename}
+        {/* Header */}
+        <div
+          className="h-12 px-4 border-b border-[#27272a] flex items-center justify-between cursor-pointer hover:bg-[#27272a] transition-colors group"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <div className="flex items-center gap-3 overflow-hidden">
+            <div
+              className={`w-6 h-6 flex items-center justify-center rounded text-[10px] font-bold font-mono tracking-tighter ${getStatusColor(
+                data.status
+              )}`}
             >
-              {data.filename}
-            </span>
-            {data.status === "related" && data.referenceLine && (
-              <span className="text-[10px] text-zinc-500 font-mono">
-                Line {data.referenceLine}
+              {getFileIcon(data.filename)}
+            </div>
+            <div className="flex flex-col overflow-hidden">
+              <span
+                className="font-mono text-sm text-zinc-300 group-hover:text-white transition-colors truncate"
+                title={data.filename}
+              >
+                {data.filename}
               </span>
+              {data.status === "related" && data.referenceLine && (
+                <span className="text-[10px] text-zinc-500 font-mono">
+                  Line {data.referenceLine}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {comments.length > 0 && (
+              <div className="flex items-center gap-1 text-zinc-500">
+                <MessageSquare size={12} />
+                <span className="text-[10px]">{comments.length}</span>
+              </div>
+            )}
+            <span
+              className={`text-[10px] px-2 py-0.5 rounded font-medium uppercase tracking-wider ${getStatusColor(
+                data.status
+              )}`}
+            >
+              {data.status}
+            </span>
+            {expanded ? (
+              <Minimize2 size={14} className="text-zinc-500" />
+            ) : (
+              <Maximize2 size={14} className="text-zinc-500" />
             )}
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          {comments.length > 0 && (
-            <div className="flex items-center gap-1 text-zinc-500">
-              <MessageSquare size={12} />
-              <span className="text-[10px]">{comments.length}</span>
+
+        {/* Analyze Button for main files */}
+        {expanded &&
+          data.status !== "related" &&
+          onAnalyze &&
+          !data.referencesChecked && (
+            <div className="px-4 py-2 border-b border-[#27272a] bg-[#18181b]">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAnalyze(data.filename);
+                }}
+                className="text-[10px] bg-blue-900/30 text-blue-400 hover:bg-blue-900/50 px-2 py-1 rounded border border-blue-900/50 transition-colors w-full"
+              >
+                Find References
+              </button>
             </div>
           )}
-          <span
-            className={`text-[10px] px-2 py-0.5 rounded font-medium uppercase tracking-wider ${getStatusColor(
-              data.status,
-            )}`}
-          >
-            {data.status}
-          </span>
-          {expanded ? (
-            <Minimize2 size={14} className="text-zinc-500" />
-          ) : (
-            <Maximize2 size={14} className="text-zinc-500" />
-          )}
-        </div>
-      </div>
 
-      {/* Analyze Button for main files */}
-      {expanded &&
-        data.status !== "related" &&
-        onAnalyze &&
-        !data.referencesChecked && (
-          <div className="px-4 py-2 border-b border-[#27272a] bg-[#18181b]">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onAnalyze(data.filename);
-              }}
-              className="text-[10px] bg-blue-900/30 text-blue-400 hover:bg-blue-900/50 px-2 py-1 rounded border border-blue-900/50 transition-colors w-full"
+        {expanded &&
+          data.status !== "related" &&
+          data.referencesChecked &&
+          !hasAnyReferences && (
+            <div className="px-4 py-2 border-b border-[#27272a] bg-[#18181b] text-[11px] text-zinc-400">
+              No references found for this file.
+            </div>
+          )}
+
+        {expanded && (
+          <>
+            {/* File-level comments */}
+            {fileComments.length > 0 && (
+              <div className="border-b border-[#27272a] p-3 space-y-2 bg-[#18181b]">
+                {fileComments.map((comment) => (
+                  <CommentThread
+                    key={comment.id}
+                    comment={comment}
+                    onReply={(body) => onReplyComment?.(comment.id, body)}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    isSubmitting={isSubmitting}
+                    currentUser={currentUser}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Diff Content */}
+            <div
+              ref={diffContentRef}
+              className="bg-[#09090b] min-h-[150px] max-h-[400px] overflow-y-auto custom-scrollbar relative font-mono text-xs"
+              style={{ userSelect: "text" }}
             >
-              Find References
-            </button>
-          </div>
-        )}
+              <div className="py-2">
+                {parsedDiff.lines.map((line: string, i: number) => {
+                  const displayLine = diffDisplayLines[i] ?? line;
+                  if (data.status === "related") {
+                    const highlighted =
+                      highlightedLines[i] ?? escapeHtml(displayLine);
 
-      {expanded &&
-        data.status !== "related" &&
-        data.referencesChecked &&
-        !hasAnyReferences && (
-          <div className="px-4 py-2 border-b border-[#27272a] bg-[#18181b] text-[11px] text-zinc-400">
-            No references found for this file.
-          </div>
-        )}
+                    const lineNumber = parsedDiff.lineNumbers.get(i) || i + 1;
+                    const isRefLine = lineNumber === data.referenceLine;
 
-      {expanded && (
-        <>
-          {/* File-level comments */}
-          {fileComments.length > 0 && (
-            <div className="border-b border-[#27272a] p-3 space-y-2 bg-[#18181b]">
-              {fileComments.map((comment) => (
-                <CommentThread
-                  key={comment.id}
-                  comment={comment}
-                  onReply={(body) => onReplyComment?.(comment.id, body)}
-                  onEdit={handleEdit}
-                  onDelete={handleDelete}
-                  isSubmitting={isSubmitting}
-                  currentUser={currentUser}
-                />
-              ))}
-            </div>
-          )}
+                    return (
+                      <div
+                        key={i}
+                        className={`flex items-start gap-2 py-0.5 w-full border-l-2 ${
+                          isRefLine
+                            ? "bg-blue-900/20 border-blue-500/50"
+                            : "border-transparent hover:bg-zinc-800/30"
+                        }`}
+                      >
+                        <div className="shrink-0 w-12 flex items-center justify-end pr-3 select-none text-zinc-600 text-[10px] font-mono border-r border-[#27272a]/50 mr-2">
+                          {lineNumber}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span
+                            className="hljs text-zinc-400 inline-block w-full whitespace-pre break-all"
+                            style={{ background: "transparent" }}
+                            dangerouslySetInnerHTML={{ __html: highlighted }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  }
 
-          {/* Diff Content */}
-          <div
-            ref={diffContentRef}
-            className="bg-[#09090b] min-h-[150px] max-h-[400px] overflow-y-auto custom-scrollbar relative font-mono text-xs"
-            style={{ userSelect: "text" }}
-          >
-            <div className="py-2">
-              {parsedDiff.lines.map((line: string, i: number) => {
-                const displayLine = diffDisplayLines[i] ?? line;
-                if (data.status === "related") {
-                  const highlighted =
-                    highlightedLines[i] ?? escapeHtml(displayLine);
-                  
-                  const lineNumber = parsedDiff.lineNumbers.get(i) || i + 1;
-                  const isRefLine = lineNumber === data.referenceLine;
+                  const lineNumber = parsedDiff.lineNumbers.get(i) || null;
+                  const commentCount = getCommentCountForLine(lineNumber);
+                  const hasComments = commentCount > 0;
+                  const isExpanded =
+                    lineNumber !== null && expandedCommentLines.has(lineNumber);
+                  const isInputVisible =
+                    showCommentInput &&
+                    commentingLine === lineNumber &&
+                    lineNumber !== null;
+
+                  let bgClass = "bg-transparent";
+                  let textClass = "text-zinc-400";
+                  let borderClass = "border-transparent";
+
+                  if (line.startsWith("+")) {
+                    bgClass = "bg-emerald-900/20";
+                    textClass = "text-emerald-400";
+                    borderClass = "border-emerald-500";
+                  } else if (line.startsWith("-")) {
+                    bgClass = "bg-rose-900/20";
+                    textClass = "text-rose-400";
+                    borderClass = "border-rose-500";
+                  } else if (line.startsWith("@@")) {
+                    textClass = "text-blue-400";
+                  }
+
+                  const wordDiff = parsedDiff.wordDiffs?.get(i);
 
                   return (
-                    <div
-                      key={i}
-                      className={`flex items-start gap-2 py-0.5 w-full border-l-2 ${
-                        isRefLine 
-                          ? "bg-blue-900/20 border-blue-500/50" 
-                          : "border-transparent hover:bg-zinc-800/30"
-                      }`}
-                    >
-                      <div className="shrink-0 w-12 flex items-center justify-end pr-3 select-none text-zinc-600 text-[10px] font-mono border-r border-[#27272a]/50 mr-2">
-                        {lineNumber}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span
-                          className="hljs text-zinc-400 inline-block w-full whitespace-pre break-all"
-                          style={{ background: "transparent" }}
-                          dangerouslySetInnerHTML={{ __html: highlighted }}
-                        />
-                      </div>
-                    </div>
-                  );
-                }
+                    <div key={i} className="flex flex-col group">
+                      {/* Line Row */}
+                      <div
+                        className={`${bgClass} flex items-start gap-2 py-0.5 w-full border-l-2 ${borderClass} hover:bg-opacity-40 transition-colors relative`}
+                      >
+                        {/* Line number / Add Comment Button */}
+                        <div className="shrink-0 w-12 flex items-center justify-end pr-3 relative border-r border-[#27272a]/50">
+                          {lineNumber !== null ? (
+                            <>
+                              {/* Line Number / Marker */}
+                              <span className="text-[10px] text-zinc-600 font-mono">
+                                {lineNumber}
+                              </span>
+                              {/* Add Comment Plus Button */}
+                              <button
+                                onClick={() => handleLineClick(lineNumber)}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 bg-blue-600 text-white rounded-md flex items-center justify-center shadow-lg transform translate-x-1/2 hover:bg-blue-500 absolute right-0 top-1/2 -translate-y-1/2 z-10"
+                                title="Add comment"
+                              >
+                                <Plus size={12} strokeWidth={3} />
+                              </button>
+                            </>
+                          ) : (
+                            <span className="text-[10px] text-zinc-600">·</span>
+                          )}
+                        </div>
 
-                const lineNumber = parsedDiff.lineNumbers.get(i) || null;
-                const commentCount = getCommentCountForLine(lineNumber);
-                const hasComments = commentCount > 0;
-                const isExpanded =
-                  lineNumber !== null && expandedCommentLines.has(lineNumber);
-                const isInputVisible =
-                  showCommentInput &&
-                  commentingLine === lineNumber &&
-                  lineNumber !== null;
-
-                let bgClass = "bg-transparent";
-                let textClass = "text-zinc-400";
-                let borderClass = "border-transparent";
-
-                if (line.startsWith("+")) {
-                  bgClass = "bg-emerald-900/20";
-                  textClass = "text-emerald-400";
-                  borderClass = "border-emerald-500";
-                } else if (line.startsWith("-")) {
-                  bgClass = "bg-rose-900/20";
-                  textClass = "text-rose-400";
-                  borderClass = "border-rose-500";
-                } else if (line.startsWith("@@")) {
-                  textClass = "text-blue-400";
-                }
-
-                const wordDiff = parsedDiff.wordDiffs?.get(i);
-
-                return (
-                  <div key={i} className="flex flex-col group">
-                    {/* Line Row */}
-                    <div
-                      className={`${bgClass} flex items-start gap-2 py-0.5 w-full border-l-2 ${borderClass} hover:bg-opacity-40 transition-colors relative`}
-                    >
-                      {/* Line number / Add Comment Button */}
-                      <div className="shrink-0 w-12 flex items-center justify-end pr-3 relative border-r border-[#27272a]/50">
-                        {lineNumber !== null ? (
-                          <>
-                            {/* Line Number / Marker */}
-                            <span className="text-[10px] text-zinc-600 font-mono">
-                              {lineNumber}
-                            </span>
-                            {/* Add Comment Plus Button */}
-                            <button
-                              onClick={() => handleLineClick(lineNumber)}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 bg-blue-600 text-white rounded-md flex items-center justify-center shadow-lg transform translate-x-1/2 hover:bg-blue-500 absolute right-0 top-1/2 -translate-y-1/2 z-10"
-                              title="Add comment"
+                        {/* Line content */}
+                        <div className="flex-1 min-w-0">
+                          {wordDiff ? (
+                            <span
+                              className={`hljs ${textClass} whitespace-pre break-all`}
+                              style={{ background: "transparent" }}
                             >
-                              <Plus size={12} strokeWidth={3} />
-                            </button>
-                          </>
-                        ) : (
-                          <span className="text-[10px] text-zinc-600">·</span>
-                        )}
-                      </div>
+                              {wordDiff.map((part, idx: number) => {
+                                const partHtml =
+                                  highlightToHtmlLines(
+                                    part.value,
+                                    highlightLanguage
+                                  )[0] ?? escapeHtml(part.value);
 
-                      {/* Line content */}
-                      <div className="flex-1 min-w-0">
-                        {wordDiff ? (
-                          <span
-                            className={`hljs ${textClass} whitespace-pre break-all`}
-                            style={{ background: "transparent" }}
-                          >
-                            {wordDiff.map((part, idx: number) => {
-                              const partHtml =
-                                highlightToHtmlLines(
-                                  part.value,
-                                  highlightLanguage,
-                                )[0] ?? escapeHtml(part.value);
+                                if (line.startsWith("-")) {
+                                  if (part.added) return null;
+                                  const partClass = part.removed
+                                    ? "bg-rose-900/60 text-rose-200"
+                                    : "";
+                                  return (
+                                    <span
+                                      key={idx}
+                                      className={partClass}
+                                      dangerouslySetInnerHTML={{
+                                        __html: partHtml,
+                                      }}
+                                    />
+                                  );
+                                }
 
-                              if (line.startsWith("-")) {
-                                if (part.added) return null;
-                                const partClass = part.removed
-                                  ? "bg-rose-900/60 text-rose-200"
+                                // Added or unchanged line
+                                if (part.removed) return null;
+                                const partClass = part.added
+                                  ? "bg-emerald-900/60 text-emerald-200"
                                   : "";
                                 return (
                                   <span
                                     key={idx}
                                     className={partClass}
-                                    dangerouslySetInnerHTML={{ __html: partHtml }}
+                                    dangerouslySetInnerHTML={{
+                                      __html: partHtml,
+                                    }}
                                   />
                                 );
-                              }
-
-                              // Added or unchanged line
-                              if (part.removed) return null;
-                              const partClass = part.added
-                                ? "bg-emerald-900/60 text-emerald-200"
-                                : "";
-                              return (
-                                <span
-                                  key={idx}
-                                  className={partClass}
-                                  dangerouslySetInnerHTML={{ __html: partHtml }}
-                                />
-                              );
-                            })}
-                          </span>
-                        ) : (
-                          <span
-                            className={`hljs ${textClass} whitespace-pre break-all`}
-                            style={{ background: "transparent" }}
-                            dangerouslySetInnerHTML={{
-                              __html:
-                                highlightedLines[i] ?? escapeHtml(displayLine),
-                            }}
-                          />
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Comment Thread & Input Row */}
-                    {((isExpanded && hasComments) || isInputVisible) &&
-                      lineNumber !== null && (
-                        <div className="w-full bg-[#09090b] border-t border-b border-[#27272a] animate-in fade-in slide-in-from-top-1 duration-200 font-sans">
-                          {/* Thread */}
-                          {isExpanded &&
-                            hasComments &&
-                            commentsByLine.get(lineNumber)!.map((comment) => (
-                              <div
-                                key={comment.id}
-                                className="p-3 border-b border-[#27272a] last:border-0"
-                              >
-                                <CommentThread
-                                  comment={comment}
-                                  onReply={(body) =>
-                                    onReplyComment?.(comment.id, body)
-                                  }
-                                  onEdit={handleEdit}
-                                  onDelete={handleDelete}
-                                  isSubmitting={isSubmitting}
-                                  currentUser={currentUser}
-                                />
-                              </div>
-                            ))}
-
-                          {/* Input */}
-                          {isInputVisible && (
-                            <div className="p-3">
-                              <CommentInput
-                                onSubmit={handleAddComment}
-                                onCancel={() => {
-                                  setShowCommentInput(false);
-                                  setCommentingLine(null);
-                                }}
-                                placeholder="Leave a comment"
-                                isSubmitting={isSubmitting}
-                              />
-                            </div>
+                              })}
+                            </span>
+                          ) : (
+                            <span
+                              className={`hljs ${textClass} whitespace-pre break-all`}
+                              style={{ background: "transparent" }}
+                              dangerouslySetInnerHTML={{
+                                __html:
+                                  highlightedLines[i] ??
+                                  escapeHtml(displayLine),
+                              }}
+                            />
                           )}
                         </div>
-                      )}
-                  </div>
-                );
-              })}
-            </div>
+                      </div>
 
-            {/* File-level comment input */}
-            {showCommentInput && commentingLine === null && !textSelection && (
-              <div className="p-3 border-t border-[#27272a] font-sans">
-                <CommentInput
-                  onSubmit={handleAddComment}
-                  onCancel={() => {
-                    setShowCommentInput(false);
-                    setCommentingLine(null);
-                  }}
-                  placeholder="Add a general comment on this file..."
-                  isSubmitting={isSubmitting}
-                />
+                      {/* Comment Thread & Input Row */}
+                      {((isExpanded && hasComments) || isInputVisible) &&
+                        lineNumber !== null && (
+                          <div className="w-full bg-[#09090b] border-t border-b border-[#27272a] animate-in fade-in slide-in-from-top-1 duration-200 font-sans">
+                            {/* Thread */}
+                            {isExpanded &&
+                              hasComments &&
+                              commentsByLine.get(lineNumber)!.map((comment) => (
+                                <div
+                                  key={comment.id}
+                                  className="p-3 border-b border-[#27272a] last:border-0"
+                                >
+                                  <CommentThread
+                                    comment={comment}
+                                    onReply={(body) =>
+                                      onReplyComment?.(comment.id, body)
+                                    }
+                                    onEdit={handleEdit}
+                                    onDelete={handleDelete}
+                                    isSubmitting={isSubmitting}
+                                    currentUser={currentUser}
+                                  />
+                                </div>
+                              ))}
+
+                            {/* Input */}
+                            {isInputVisible && (
+                              <div className="p-3">
+                                <CommentInput
+                                  onSubmit={handleAddComment}
+                                  onCancel={() => {
+                                    setShowCommentInput(false);
+                                    setCommentingLine(null);
+                                  }}
+                                  placeholder="Leave a comment"
+                                  isSubmitting={isSubmitting}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                    </div>
+                  );
+                })}
               </div>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-};
+
+              {/* File-level comment input */}
+              {showCommentInput &&
+                commentingLine === null &&
+                !textSelection && (
+                  <div className="p-3 border-t border-[#27272a] font-sans">
+                    <CommentInput
+                      onSubmit={handleAddComment}
+                      onCancel={() => {
+                        setShowCommentInput(false);
+                        setCommentingLine(null);
+                      }}
+                      placeholder="Add a general comment on this file..."
+                      isSubmitting={isSubmitting}
+                    />
+                  </div>
+                )}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+);

@@ -75,7 +75,6 @@ export interface Comment {
 export interface FileNodeProps {
   node: Node;
   style: React.CSSProperties;
-  zoom: number;
   onAnalyze?: (filename: string) => void;
   onSize?: (nodeId: string, height: number) => void;
   comments?: Comment[];
