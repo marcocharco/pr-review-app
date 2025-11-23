@@ -4,6 +4,12 @@ import {
   GitPullRequest,
   GitPullRequestClosed,
   GitPullRequestDraft,
+  GitCommit,
+  GitBranch,
+  ChevronUp,
+  ChevronDown,
+  X,
+  CheckCircle2,
   Loader2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -56,6 +62,23 @@ export default function App() {
   // Comment State
   const [comments, setComments] = useState<Comment[]>([]);
   const [isPosting, setIsPosting] = useState(false);
+
+  // Merge State
+  const [showMergeMenu, setShowMergeMenu] = useState(false);
+  const [selectedStrategy, setSelectedStrategy] = useState<
+    "merge" | "squash" | "rebase"
+  >("merge");
+  const [mergeModal, setMergeModal] = useState<{
+    isOpen: boolean;
+    strategy: string | null;
+  }>({ isOpen: false, strategy: null });
+  const [commitTitle, setCommitTitle] = useState("");
+  const [commitMessage, setCommitMessage] = useState("");
+  const [isMerging, setIsMerging] = useState(false);
+  const [mergeStatus, setMergeStatus] = useState<"success" | "error" | null>(
+    null
+  );
+  const [mergeErrorMsg, setMergeErrorMsg] = useState("");
 
   // Canvas State
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -265,6 +288,62 @@ export default function App() {
 
   const handleDeleteComment = async (commentId: number) => {
     console.warn("Delete not implemented in backend yet", commentId);
+  };
+
+  // --- Merge Logic ---
+
+  const initiateMerge = (strategy: string) => {
+    setMergeModal({ isOpen: true, strategy });
+    setShowMergeMenu(false);
+    // Pre-fill title with PR title from repoInfo
+    setCommitTitle(
+      repoInfo?.prTitle ||
+        (repoInfo?.prNumber ? `Merge pull request #${repoInfo.prNumber}` : "")
+    );
+    setCommitMessage("");
+    setMergeStatus(null);
+  };
+
+  const confirmMerge = async () => {
+    if (!repoInfo || !mergeModal.strategy) return;
+    setIsMerging(true);
+    setMergeStatus(null);
+
+    try {
+      // Call LOCAL endpoint /merge instead of GitHub API
+      const response = await fetch("/merge", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          commit_title: commitTitle,
+          commit_message: commitMessage,
+          merge_method: mergeModal.strategy,
+          sha: repoInfo.head, // Send head SHA for safety
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(errText || "Merge failed");
+      }
+
+      setMergeStatus("success");
+      setTimeout(() => {
+        setMergeModal({ isOpen: false, strategy: null });
+        // Optionally refresh session to show "merged" status
+        fetchSession();
+      }, 2000);
+    } catch (err) {
+      console.error(err);
+      setMergeStatus("error");
+      setMergeErrorMsg(
+        err instanceof Error ? err.message : "Unknown error occurred"
+      );
+    } finally {
+      setIsMerging(false);
+    }
   };
 
   // --- Canvas Logic ---
@@ -915,27 +994,256 @@ export default function App() {
           </div>
         )}
 
-        {/* Controls Overlay */}
-        <div className="absolute bottom-6 right-6 flex flex-col gap-2 pointer-events-auto">
-          <div className="bg-[#18181b] border border-[#27272a] p-1 rounded-lg shadow-xl flex flex-col gap-1">
-            <button
-              className="p-2 hover:bg-[#27272a] rounded text-zinc-400 hover:text-zinc-100 transition-colors"
-              onClick={() => setZoom((z) => z + 0.1)}
-            >
-              +
-            </button>
-            <div className="h-px bg-[#27272a] mx-2" />
-            <button
-              className="p-2 hover:bg-[#27272a] rounded text-zinc-400 hover:text-zinc-100 transition-colors"
-              onClick={() => setZoom((z) => Math.max(0.1, z - 0.1))}
-            >
-              -
-            </button>
-          </div>
-          <div className="bg-[#18181b] border border-[#27272a] px-2 py-1 rounded-md shadow-xl text-[10px] text-center font-mono text-zinc-500">
-            {Math.round(zoom * 100)}%
+        {/* Controls Container */}
+        <div className="absolute bottom-6 right-6 flex items-end gap-4 pointer-events-auto z-40">
+          {/* MERGE BUTTONS */}
+          {repoInfo?.prStatus === "open" && (
+            <div className="relative flex flex-col items-end">
+              {showMergeMenu && (
+                <div className="absolute bottom-full right-0 mb-2 w-64 bg-[#18181b] border border-[#27272a] rounded-md shadow-xl overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200 flex flex-col">
+                  <div className="px-3 py-2 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-[#27272a] bg-[#1f1f23]">
+                    Select merge strategy
+                  </div>
+                  <button
+                    onClick={() => {
+                      setSelectedStrategy("merge");
+                      setShowMergeMenu(false);
+                    }}
+                    className="text-left px-3 py-3 text-zinc-300 hover:bg-zinc-800 hover:text-white text-xs font-medium flex items-start gap-3 transition-colors border-b border-[#27272a] last:border-0"
+                  >
+                    <GitMerge
+                      size={16}
+                      className="text-green-500 mt-0.5 shrink-0"
+                    />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-semibold text-zinc-200">
+                        Create a merge commit
+                      </span>
+                      <span className="text-[10px] text-zinc-500 leading-tight">
+                        All commits from this branch will be added to the base
+                        branch via a merge commit.
+                      </span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedStrategy("squash");
+                      setShowMergeMenu(false);
+                    }}
+                    className="text-left px-3 py-3 text-zinc-300 hover:bg-zinc-800 hover:text-white text-xs font-medium flex items-start gap-3 transition-colors border-b border-[#27272a] last:border-0"
+                  >
+                    <GitCommit
+                      size={16}
+                      className="text-blue-500 mt-0.5 shrink-0"
+                    />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-semibold text-zinc-200">
+                        Squash and merge
+                      </span>
+                      <span className="text-[10px] text-zinc-500 leading-tight">
+                        The 1 commit from this branch will be added to the base
+                        branch.
+                      </span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedStrategy("rebase");
+                      setShowMergeMenu(false);
+                    }}
+                    className="text-left px-3 py-3 text-zinc-300 hover:bg-zinc-800 hover:text-white text-xs font-medium flex items-start gap-3 transition-colors"
+                  >
+                    <GitBranch
+                      size={16}
+                      className="text-purple-500 mt-0.5 shrink-0"
+                    />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-semibold text-zinc-200">
+                        Rebase and merge
+                      </span>
+                      <span className="text-[10px] text-zinc-500 leading-tight">
+                        The 1 commit from this branch will be rebased and added
+                        to the base branch.
+                      </span>
+                    </div>
+                  </button>
+                </div>
+              )}
+
+              <div className="flex items-stretch shadow-xl rounded-md overflow-hidden">
+                <button
+                  onClick={() => initiateMerge(selectedStrategy)}
+                  className={`flex items-center gap-2 px-4 py-2 text-white text-sm font-medium transition-colors ${
+                    selectedStrategy === "merge"
+                      ? "bg-[#238636] hover:bg-[#2ea043]"
+                      : selectedStrategy === "squash"
+                      ? "bg-[#1f6feb] hover:bg-[#388bfd]"
+                      : "bg-[#8957e5] hover:bg-[#a371f7]"
+                  }`}
+                >
+                  {selectedStrategy === "merge" && <GitMerge size={16} />}
+                  {selectedStrategy === "squash" && <GitCommit size={16} />}
+                  {selectedStrategy === "rebase" && <GitBranch size={16} />}
+                  <span>
+                    {selectedStrategy === "merge"
+                      ? "Merge pull request"
+                      : selectedStrategy === "squash"
+                      ? "Squash and merge"
+                      : "Rebase and merge"}
+                  </span>
+                </button>
+                <div className="w-px bg-black/20" />
+                <button
+                  onClick={() => setShowMergeMenu(!showMergeMenu)}
+                  className={`px-2 flex items-center justify-center text-white transition-colors ${
+                    selectedStrategy === "merge"
+                      ? "bg-[#238636] hover:bg-[#2ea043]"
+                      : selectedStrategy === "squash"
+                      ? "bg-[#1f6feb] hover:bg-[#388bfd]"
+                      : "bg-[#8957e5] hover:bg-[#a371f7]"
+                  }`}
+                >
+                  {showMergeMenu ? (
+                    <ChevronUp size={16} />
+                  ) : (
+                    <ChevronDown size={16} />
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Zoom Controls */}
+          <div className="flex flex-col gap-2">
+            <div className="bg-[#18181b] border border-[#27272a] p-1 rounded-lg shadow-xl flex flex-col gap-1">
+              <button
+                className="p-2 hover:bg-[#27272a] rounded text-zinc-400 hover:text-zinc-100 transition-colors"
+                onClick={() => setZoom((z) => z + 0.1)}
+              >
+                +
+              </button>
+              <div className="h-px bg-[#27272a] mx-2" />
+              <button
+                className="p-2 hover:bg-[#27272a] rounded text-zinc-400 hover:text-zinc-100 transition-colors"
+                onClick={() => setZoom((z) => Math.max(0.1, z - 0.1))}
+              >
+                -
+              </button>
+            </div>
+            <div className="bg-[#18181b] border border-[#27272a] px-2 py-1 rounded-md shadow-xl text-[10px] text-center font-mono text-zinc-500">
+              {Math.round(zoom * 100)}%
+            </div>
           </div>
         </div>
+
+        {/* MERGE MODAL */}
+        {mergeModal.isOpen && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm z-50 animate-in fade-in duration-200">
+            <div className="bg-[#18181b] border border-[#27272a] rounded-lg shadow-2xl w-full max-w-lg overflow-hidden pointer-events-auto">
+              <div className="p-4 border-b border-[#27272a] flex items-center justify-between">
+                <h3 className="font-medium text-white flex items-center gap-2">
+                  {mergeModal.strategy === "merge" && (
+                    <GitMerge size={16} className="text-green-500" />
+                  )}
+                  {mergeModal.strategy === "squash" && (
+                    <GitCommit size={16} className="text-blue-500" />
+                  )}
+                  {mergeModal.strategy === "rebase" && (
+                    <GitBranch size={16} className="text-purple-500" />
+                  )}
+                  Confirm{" "}
+                  {mergeModal.strategy &&
+                    mergeModal.strategy.charAt(0).toUpperCase() +
+                      mergeModal.strategy.slice(1)}
+                </h3>
+                <button
+                  onClick={() =>
+                    setMergeModal({ isOpen: false, strategy: null })
+                  }
+                  className="text-zinc-500 hover:text-white"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              {mergeStatus === "success" ? (
+                <div className="p-8 flex flex-col items-center text-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center text-green-500 mb-2">
+                    <CheckCircle2 size={32} />
+                  </div>
+                  <h4 className="text-white font-medium">
+                    Pull Request Merged!
+                  </h4>
+                  <p className="text-zinc-400 text-sm">Refreshing session...</p>
+                </div>
+              ) : (
+                <>
+                  <div className="p-6 flex flex-col gap-4">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-zinc-500 uppercase">
+                        Commit Title
+                      </label>
+                      <input
+                        className="bg-[#09090b] border border-[#27272a] rounded p-2 text-zinc-300 text-sm focus:border-blue-500 outline-none"
+                        value={commitTitle}
+                        onChange={(e) => setCommitTitle(e.target.value)}
+                        disabled={mergeModal.strategy === "rebase"}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-zinc-500 uppercase">
+                        Commit Message
+                      </label>
+                      <textarea
+                        rows={4}
+                        className="bg-[#09090b] border border-[#27272a] rounded p-2 text-zinc-300 text-sm focus:border-blue-500 outline-none resize-none"
+                        value={commitMessage}
+                        onChange={(e) => setCommitMessage(e.target.value)}
+                        placeholder={
+                          mergeModal.strategy === "rebase"
+                            ? "Commit messages are usually ignored for rebase merges on GitHub API."
+                            : "Add description..."
+                        }
+                        disabled={mergeModal.strategy === "rebase"}
+                      />
+                    </div>
+                    {mergeStatus === "error" && (
+                      <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded text-xs text-rose-400 flex items-center gap-2">
+                        <AlertCircle size={14} />
+                        <span>{mergeErrorMsg}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-4 bg-[#1f1f23] border-t border-[#27272a] flex justify-end gap-3">
+                    <button
+                      onClick={() =>
+                        setMergeModal({ isOpen: false, strategy: null })
+                      }
+                      className="px-4 py-2 text-xs font-medium text-zinc-400 hover:text-white transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={confirmMerge}
+                      disabled={isMerging}
+                      className={`px-4 py-2 rounded text-xs font-medium text-white flex items-center gap-2 transition-opacity ${
+                        mergeModal.strategy === "merge"
+                          ? "bg-[#238636] hover:bg-[#2ea043]"
+                          : mergeModal.strategy === "squash"
+                          ? "bg-[#1f6feb] hover:bg-[#388bfd]"
+                          : "bg-[#8957e5] hover:bg-[#a371f7]"
+                      }`}
+                    >
+                      {isMerging && (
+                        <Loader2 size={12} className="animate-spin" />
+                      )}
+                      Confirm Merge
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
