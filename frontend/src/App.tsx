@@ -149,7 +149,7 @@ export default function App() {
     filePath: string,
     body: string,
     lineNumber?: number,
-    startLine?: number,
+    startLine?: number
   ) => {
     if (!repoInfo?.head) {
       console.error("No HEAD SHA available");
@@ -192,10 +192,10 @@ export default function App() {
             "Permission Error: The GitHub App or Token used does not have permission to comment on this repository.\n\n" +
               "If using a GitHub App, ensure it is installed on this repository.\n" +
               "If using a Token, ensure it has 'repo' or 'pull_requests:write' scope.\n\n" +
-              "You can manually configure a Personal Access Token in ~/.config/pr-review/apps.json",
+              "You can manually configure a Personal Access Token in ~/.config/pr-review/apps.json"
           );
           throw new Error(
-            "Permission denied: App not installed or token invalid",
+            "Permission denied: App not installed or token invalid"
           );
         }
         throw new Error(errText || "Failed to post comment");
@@ -218,7 +218,7 @@ export default function App() {
       ) {
         alert(
           "Failed to post comment: " +
-            (error instanceof Error ? error.message : String(error)),
+            (error instanceof Error ? error.message : String(error))
         );
       }
     } finally {
@@ -332,8 +332,8 @@ export default function App() {
       setMergeStatus("success");
       setTimeout(() => {
         setMergeModal({ isOpen: false, strategy: null });
-        // Optionally refresh session to show "merged" status
-        fetchSession();
+        // Refresh session to show updated "merged" status
+        fetchSession(true);
       }, 2000);
     } catch (err) {
       console.error(err);
@@ -426,7 +426,7 @@ export default function App() {
     // Check if the event is over a scrollable element
     const targetElement = event.target as HTMLElement;
     const scrollableElement = targetElement.closest?.(
-      ".overflow-y-auto",
+      ".overflow-y-auto"
     ) as HTMLElement;
 
     // Determine gesture type on first event or if gesture state is reset
@@ -519,7 +519,7 @@ export default function App() {
       // Calculate new zoom
       const newZoom = Math.max(
         0.1,
-        Math.min(3, currentZoom - event.deltaY * ZOOM_SPEED),
+        Math.min(3, currentZoom - event.deltaY * ZOOM_SPEED)
       );
 
       // Calculate new pan to keep the point under cursor fixed
@@ -582,7 +582,7 @@ export default function App() {
       const measuredFileHeight = nodeHeights[fileNodeId];
       const fileHeight = Math.max(
         measuredFileHeight ?? DEFAULT_FILE_HEIGHT,
-        MIN_FILE_HEIGHT,
+        MIN_FILE_HEIGHT
       );
       newNodes.push({
         id: fileNodeId,
@@ -603,7 +603,7 @@ export default function App() {
               const measuredRefHeight = nodeHeights[refNodeId];
               const refHeight = Math.max(
                 measuredRefHeight ?? DEFAULT_REF_HEIGHT,
-                MIN_REF_HEIGHT,
+                MIN_REF_HEIGHT
               );
               const refY = startY + refYOffset;
 
@@ -666,7 +666,7 @@ export default function App() {
         const nextFiles = [...prevFiles];
         updatedFiles.forEach((update) => {
           const idx = nextFiles.findIndex(
-            (f) => f.filename === update.filename,
+            (f) => f.filename === update.filename
           );
           if (idx !== -1) {
             nextFiles[idx] = {
@@ -702,7 +702,7 @@ export default function App() {
 
         if (!response.ok) {
           throw new Error(
-            `Failed to fetch session: ${response.status} ${response.statusText}`,
+            `Failed to fetch session: ${response.status} ${response.statusText}`
           );
         }
 
@@ -735,7 +735,7 @@ export default function App() {
             patch: f.patch,
             changedSpans: f.changedSpans,
             referencesChecked: Array.isArray(f.changedSpans),
-          }),
+          })
         );
 
         // Process comments
@@ -750,13 +750,13 @@ export default function App() {
       } catch (err) {
         console.error(err);
         setError(
-          err instanceof Error ? err.message : "An unknown error occurred",
+          err instanceof Error ? err.message : "An unknown error occurred"
         );
       } finally {
         setIsLoading(false);
       }
     },
-    [processComments],
+    [processComments]
   );
 
   useEffect(() => {
@@ -797,10 +797,10 @@ export default function App() {
                         repoInfo.prStatus === "merged"
                           ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
                           : repoInfo.prStatus === "closed"
-                            ? "bg-red-500/10 text-red-400 border-red-500/20"
-                            : repoInfo.prStatus === "draft"
-                              ? "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
-                              : "bg-green-500/10 text-green-400 border-green-500/20"
+                          ? "bg-red-500/10 text-red-400 border-red-500/20"
+                          : repoInfo.prStatus === "draft"
+                          ? "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
+                          : "bg-green-500/10 text-green-400 border-green-500/20"
                       }`}
                     >
                       {repoInfo.prStatus === "merged" ? (
@@ -1186,7 +1186,6 @@ export default function App() {
                         className="bg-[#09090b] border border-[#27272a] rounded p-2 text-zinc-300 text-sm focus:border-blue-500 outline-none"
                         value={commitTitle}
                         onChange={(e) => setCommitTitle(e.target.value)}
-                        disabled={mergeModal.strategy === "rebase"}
                       />
                     </div>
                     <div className="flex flex-col gap-1">
@@ -1198,12 +1197,7 @@ export default function App() {
                         className="bg-[#09090b] border border-[#27272a] rounded p-2 text-zinc-300 text-sm focus:border-blue-500 outline-none resize-none"
                         value={commitMessage}
                         onChange={(e) => setCommitMessage(e.target.value)}
-                        placeholder={
-                          mergeModal.strategy === "rebase"
-                            ? "Commit messages are usually ignored for rebase merges on GitHub API."
-                            : "Add description..."
-                        }
-                        disabled={mergeModal.strategy === "rebase"}
+                        placeholder="Add description..."
                       />
                     </div>
                     {mergeStatus === "error" && (
