@@ -30,14 +30,14 @@ func Start(ctx context.Context, generator SessionGenerator, frontendFS fs.FS, de
 			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			
+
 			// Handle preflight requests
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return
 			}
 		}
-		
+
 		session, err := generator(r.Context())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -64,7 +64,7 @@ func Start(ctx context.Context, generator SessionGenerator, frontendFS fs.FS, de
 	} else {
 		addr = "127.0.0.1:0"
 	}
-	
+
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err

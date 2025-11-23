@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	redirectURI = "http://localhost:5173/oauth/callback"
+	redirectURI = "http://localhost:8080/oauth/callback"
 	authURL     = "https://github.com/login/oauth/authorize"
 	tokenURL    = "https://github.com/login/oauth/access_token"
 	userURL     = "https://api.github.com/user"
@@ -53,7 +53,7 @@ func Authenticate(ctx context.Context) (*Config, error) {
 	})
 
 	server := &http.Server{
-		Addr:    ":5173",
+		Addr:    ":8080",
 		Handler: mux,
 	}
 

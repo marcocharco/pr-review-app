@@ -15,4 +15,3 @@ build: embed-frontend
 # Clean embedded frontend
 clean:
 	@rm -rf embed/frontend/dist
-
