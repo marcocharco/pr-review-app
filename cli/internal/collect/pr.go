@@ -3,6 +3,8 @@ package collect
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/marcocharco/pr-review-app/cli/internal/git"
@@ -31,10 +33,20 @@ func BuildPRSession(ctx context.Context, prNumber int, token string) (types.Sess
 	var added, deleted int
 
 	for _, f := range prFiles {
+		var spans []types.ChangedSpan
+		changedLines, err := ParsePatch(f.Patch)
+		if err == nil && len(changedLines) > 0 {
+			content, err := os.ReadFile(filepath.Join(repoInfo.Root, f.Filename))
+			if err == nil {
+				spans, _ = AnalyzeFile(ctx, f.Filename, content, changedLines)
+			}
+		}
+
 		files = append(files, types.FileDiff{
-			Path:   f.Filename,
-			Status: f.Status,
-			Patch:  f.Patch,
+			Path:         f.Filename,
+			Status:       f.Status,
+			Patch:        f.Patch,
+			ChangedSpans: spans,
 		})
 		added += f.Additions
 		deleted += f.Deletions
