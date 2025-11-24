@@ -45,10 +45,6 @@ We used Go to create our CLI interface and backend, and React for the front end.
 
 A lot of UI challenges on the web app. Implementing the canvas proved to be quite difficult as there were many different types of interactions that needed to be considered. Also rendering and parsing diffs as well as creating the links between related files was also quite difficult. To get the references to work, figuring out what technologies to use was the only the first hurdle. Past that, using tree sitter to extract symbol information in the diff text and using LSP to find references of said symbols also was quite tricky to implement, especially since we didn't have any experience working with tree-sitter and LSPs prior.
 
-## Accomplishments that we're proud of
-
-The biggest accomplishment is probably getting referencing to work.
-
 ## What we learned
 
 We learned a lot about working with git and especially all the functionality around PRs. Beyond that, we realized through this project that code editors are actually very complex under the hood, and are more than just a text editor.
@@ -58,3 +54,13 @@ We learned a lot about working with git and especially all the functionality aro
 - more language support
 - dragging files in the canvas view
 - ai integration
+
+## Screenshots
+View related files that reference a function/var that was changed in the PR
+<img width="2780" height="1714" alt="image (1)" src="https://github.com/user-attachments/assets/888965f1-e629-4322-9f0a-975b9f24a412" />
+Add comments directly on Contify
+<img width="2780" height="1714" alt="image (2)" src="https://github.com/user-attachments/assets/82277742-267b-435f-8c9f-91beb7e73320" />
+Merge PRs directly on Contify
+<img width="2780" height="1714" alt="image (3)" src="https://github.com/user-attachments/assets/5b92cca8-87bd-4921-8940-545aff71a1db" />
+
+
