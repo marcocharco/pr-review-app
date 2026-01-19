@@ -1,12 +1,21 @@
 # Contify
 
+
+<p align="center">
+  <br/>
+  <i>Context-aware code review on an interactive infinite canvas</i>
+  <img width="1640" alt="screenshot" src="https://github.com/user-attachments/assets/8119e873-065a-433e-b1d8-e8bad3903a56">
+</p>
+
+
+
 ## Inspiration
 
 We both have a lot of experience dealing with PRs and they are often a big headache. We wanted to create a visual interface that allows us to see not only the changes in the PR but also files related to those changes. Having seen HackWestern's website this year, as well as many other infinite canvas visualization tools, we thought this would be a great use case.
 
 ## What it does
 
-Contify is a CLI tool that pulls a GitHub PR, parses the patches to find the precise spans of changed code, and visualizes them in an interactive canvas UI. It can also find code across the project that references the changes in the PR, to easily see the scope of the changes made. Contify supports easy authentication with github oauth, allowing for commenting and merging within the application.
+Contify is a CLI-driven tool for reviewing GitHub pull requests. It retrieves a PR, parses patch data to find the spans of modified code, and visualizes them in an interactive canvas interface. For each change, Contify can locate and display related variable and function usage references across the codebase, allowing reviewers to assess the blast radius of a PR by viewing affected code side by side. The tool supports GitHub OAuth for authentication and enables actions such as commenting on and merging pull requests from within the application.
 
 Some other neat features include:
 
@@ -51,16 +60,25 @@ We learned a lot about working with git and especially all the functionality aro
 
 ## What's next for Contify
 
-- more language support
-- dragging files in the canvas view
-- ai integration
+- More language support
+- Dragging files in the canvas view
+- Ai integration
 
-## Screenshots
-View related files that reference a function/var that was changed in the PR
-<img width="2780" height="1714" alt="image (1)" src="https://github.com/user-attachments/assets/888965f1-e629-4322-9f0a-975b9f24a412" />
-Add comments directly on Contify
-<img width="2780" height="1714" alt="image (2)" src="https://github.com/user-attachments/assets/82277742-267b-435f-8c9f-91beb7e73320" />
-Merge PRs directly on Contify
-<img width="2780" height="1714" alt="image (3)" src="https://github.com/user-attachments/assets/5b92cca8-87bd-4921-8940-545aff71a1db" />
+## Additional Screenshots
+
+<p align="center">
+  <img width="850" alt="Comments Feature" src="https://github.com/user-attachments/assets/82277742-267b-435f-8c9f-91beb7e73320" />
+  <br/>
+  <span>Add inline comments on changes</span>
+</p>
+
+<br/>
+
+
+<p align="center">
+  <img width="850" alt="Merge Feature" src="https://github.com/user-attachments/assets/5b92cca8-87bd-4921-8940-545aff71a1db" />
+  <br/>
+  <span>Merge PRs</span>
+</p>
 
 
